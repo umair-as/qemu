@@ -1692,7 +1692,7 @@ static bool its_readl(GICv3ITSState *s, hwaddr offset,
         *data = s->ctlr;
         break;
     case GITS_IIDR:
-        *data = gicv3_iidr();
+        *data = GICV3_IIDR_DEFAULT;
         break;
     case GITS_IDREGS ... GITS_IDREGS + 0x2f:
         /* ID registers */

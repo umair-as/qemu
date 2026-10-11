@@ -746,15 +746,21 @@ void gicv3_cpuif_update(GICv3CPUState *cs);
  */
 void gicv3_cpuif_virt_irq_fiq_update(GICv3CPUState *cs);
 
-static inline uint32_t gicv3_iidr(void)
+/*
+ * Default Implementer Identification Register value: an ARM r0p0
+ * with a zero ProductID, the same as an r0p0 GIC-500.
+ */
+#define GICV3_IIDR_DEFAULT 0x43b
+
+static inline uint32_t gicv3_iidr(GICv3State *s)
 {
-    /* Return the Implementer Identification Register value
+    /*
+     * Return the Implementer Identification Register value
      * for the emulated GICv3, as reported in GICD_IIDR and GICR_IIDR.
-     *
-     * We claim to be an ARM r0p0 with a zero ProductID.
-     * This is the same as an r0p0 GIC-500.
+     * Boards modelling a specific GIC implementation set the "iidr"
+     * property; the default is GICV3_IIDR_DEFAULT.
      */
-    return 0x43b;
+    return s->iidr;
 }
 
 /* CoreSight PIDR0 values for ARM GICv3 implementations */

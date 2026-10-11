@@ -813,6 +813,11 @@ static void kvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
         return;
     }
 
+    if (s->iidr != GICV3_IIDR_DEFAULT) {
+        error_setg(errp, "Setting iidr is unsupported with the in-kernel GIC");
+        return;
+    }
+
     if (s->first_cpu_idx != 0) {
         error_setg(errp, "Non-zero first-cpu-idx is unsupported with the "
                    "in-kernel GIC");

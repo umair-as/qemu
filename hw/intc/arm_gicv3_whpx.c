@@ -175,6 +175,11 @@ static void whpx_gicv3_realize(DeviceState *dev, Error **errp)
         return;
     }
 
+    if (s->iidr != GICV3_IIDR_DEFAULT) {
+        error_setg(errp, "Setting iidr is unsupported with the platform GIC");
+        return;
+    }
+
     if (s->nb_redist_regions > 1) {
         error_setg(errp, "Multiple VGICv3 redistributor regions are not "
                    "supported by WHPX");

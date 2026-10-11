@@ -441,10 +441,7 @@ static bool gicd_readl(GICv3State *s, hwaddr offset,
         *data = 0;
         return true;
     case GICD_IIDR:
-        /* We claim to be an ARM r0p0 with a zero ProductID.
-         * This is the same as an r0p0 GIC-500.
-         */
-        *data = gicv3_iidr();
+        *data = gicv3_iidr(s);
         return true;
     case GICD_STATUSR:
         /* RAZ/WI for us (this is an optional register and our implementation

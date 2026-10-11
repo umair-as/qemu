@@ -352,7 +352,7 @@ static MemTxResult gicr_readl(GICv3CPUState *cs, hwaddr offset,
         *data = cs->gicr_ctlr;
         return MEMTX_OK;
     case GICR_IIDR:
-        *data = gicv3_iidr();
+        *data = gicv3_iidr(cs->gic);
         return MEMTX_OK;
     case GICR_TYPER:
         *data = extract64(cs->gicr_typer, 0, 32);

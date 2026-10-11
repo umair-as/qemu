@@ -806,6 +806,7 @@ F: include/hw/timer/arm_mptimer.h
 F: include/hw/timer/armv7m_systick.h
 F: include/hw/misc/armv7m_ras.h
 F: stubs/qmp-arm-gic.c
+F: tests/qtest/arm-gicv3-iidr-test.c
 F: tests/qtest/test-arm-mptimer.c
 
 Bananapi M2U
