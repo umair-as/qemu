@@ -1037,6 +1037,18 @@ F: include/hw/intc/realview_gic.h
 F: docs/system/arm/realview.rst
 F: tests/functional/arm/test_realview.py
 
+Renesas RZ/V2L SMARC EVK
+M: Umair Ahmed Shah <umairahmedshah@hotmail.com>
+L: qemu-arm@nongnu.org
+S: Maintained
+F: hw/arm/r9a07g054.c
+F: hw/arm/rzv2l-smarc.c
+F: hw/misc/renesas_rzg2l_sysc.c
+F: include/hw/arm/r9a07g054.h
+F: include/hw/misc/renesas_rzg2l_sysc.h
+F: docs/system/arm/rzv2l-smarc.rst
+F: tests/qtest/rzv2l-smarc-test.c
+
 SABRELITE / i.MX6
 M: Peter Maydell <peter.maydell@linaro.org>
 R: Jean-Christophe Dubois <jcd@tribudubois.net>

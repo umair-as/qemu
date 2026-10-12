@@ -617,6 +617,18 @@ config FSL_IMX8MP
     select USB_DWC3
     select WDT_IMX2
 
+config RZV2L_SMARC
+    bool
+    default y
+    depends on AARCH64
+    depends on TCG
+    select R9A07G054
+
+config R9A07G054
+    bool
+    select ARM_GIC
+    select RENESAS_RZG2L_SYSC
+
 config FSL_IMX8MP_EVK
     bool
     default y

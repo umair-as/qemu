@@ -275,6 +275,7 @@ qtests_aarch64 = \
    config_all_devices.has_key('CONFIG_ARM_VIRT') ?
    ['iommu-smmuv3-test'] : []) + \
   (config_all_devices.has_key('CONFIG_ARM_VIRT') ? ['arm-gicv3-iidr-test'] : []) + \
+  (config_all_devices.has_key('CONFIG_RZV2L_SMARC') ? ['rzv2l-smarc-test'] : []) + \
   qtests_cxl +                                                                                  \
   ['arm-cpu-features',
    'numa-test',

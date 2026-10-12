@@ -251,6 +251,9 @@ config DJMEMC
 config IOSB
     bool
 
+config RENESAS_RZG2L_SYSC
+    bool
+
 config XLNX_VERSAL_TRNG
     bool
 
