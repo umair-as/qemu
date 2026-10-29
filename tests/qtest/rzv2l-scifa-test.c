@@ -99,6 +99,13 @@
 #define FCR_RTRG(x)     ((x) << 6)
 #define LSR_ORER        0x0001
 #define SCR_TE_ONLY     0x0020
+#define SCR_TIE         0x0080
+#define SCR_RIE         0x0040
+#define SCR_REIE        0x0008
+#define SCR_TEIE        0x0004
+
+/* Interrupt outputs of a SCIF channel, in order (Table 22.19) */
+enum { ERI, BRI, RXI, TXI, TEI_DRI };
 
 #define FRAME_8N1_NS    87080
 #define FRAME_7E2_NS    95790
@@ -539,6 +546,111 @@ static void test_rx_disabled(void)
     stop_direct(qts, kernel);
 }
 
+/* Start SCIF0 post-firmware with its interrupt outputs intercepted */
+static QTestState *start_irq(char **kernel)
+{
+    QTestState *qts = start_direct(kernel);
+
+    qtest_irq_intercept_out_named(qts, "/machine/soc/scif0", "sysbus-irq");
+    /*
+     * qtest learns a line's level only when the device drives it after
+     * the intercept; rewrite SCR unchanged so all five lines report.
+     */
+    qtest_writew(qts, SCIF_BASE(0) + SCR, SCR_FW);
+    return qts;
+}
+
+static void check_lines(QTestState *qts, bool eri, bool bri, bool rxi,
+                        bool txi, bool tei_dri)
+{
+    g_assert_cmpint(qtest_get_irq(qts, ERI), ==, eri);
+    g_assert_cmpint(qtest_get_irq(qts, BRI), ==, bri);
+    g_assert_cmpint(qtest_get_irq(qts, RXI), ==, rxi);
+    g_assert_cmpint(qtest_get_irq(qts, TXI), ==, txi);
+    g_assert_cmpint(qtest_get_irq(qts, TEI_DRI), ==, tei_dri);
+}
+
+/* TXI = TIE & TDFE */
+static void test_irq_txi(void)
+{
+    char *kernel;
+    QTestState *qts = start_irq(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    check_lines(qts, 0, 0, 0, 0, 0);                    /* TDFE = 1, TIE = 0 */
+    qtest_writew(qts, b + SCR, SCR_FW | SCR_TIE);
+    check_lines(qts, 0, 0, 0, 1, 0);
+    for (int i = 0; i < 10; i++) {                      /* 9 in the FIFO > 8 */
+        qtest_writeb(qts, b + FTDR, 'a' + i);
+    }
+    check_lines(qts, 0, 0, 0, 0, 0);
+    stop_direct(qts, kernel);
+}
+
+/* RXI = RIE & RDF */
+static void test_irq_rxi(void)
+{
+    char *kernel;
+    QTestState *qts = start_irq(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    qtest_writew(qts, b + FCR, FCR_LOOP);               /* trigger 1 */
+    loop_bytes(qts, "r", FRAME_8N1_NS);
+    check_lines(qts, 0, 0, 0, 0, 0);                    /* RDF = 1, RIE = 0 */
+    qtest_writew(qts, b + SCR, SCR_FW | SCR_RIE);
+    check_lines(qts, 0, 0, 1, 0, 0);
+    qtest_readb(qts, b + FRDR);                         /* clears RDF */
+    check_lines(qts, 0, 0, 0, 0, 0);
+    stop_direct(qts, kernel);
+}
+
+/* TEI/DRI = (TEIE & TEND) | (RIE & DR), each term on its own */
+static void test_irq_tei_dri(void)
+{
+    char *kernel;
+    QTestState *qts = start_irq(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    qtest_writew(qts, b + SCR, SCR_FW | SCR_TEIE);      /* TEND = 1 */
+    check_lines(qts, 0, 0, 0, 0, 1);
+    qtest_writeb(qts, b + FTDR, 't');                   /* TEND = 0 */
+    check_lines(qts, 0, 0, 0, 0, 0);
+    qtest_clock_step(qts, FRAME_8N1_NS + MARGIN_NS);
+    check_lines(qts, 0, 0, 0, 0, 1);
+
+    /* DR term: one looped byte below the trigger, RIE set, TEIE clear */
+    qtest_writew(qts, b + SCR, SCR_FW | SCR_RIE);
+    qtest_writew(qts, b + FCR, FCR_LOOP | FCR_RTRG(1)); /* trigger 4 */
+    qtest_writeb(qts, b + FTDR, 'd');
+    qtest_clock_step(qts, FRAME_8N1_NS + DR_DELAY_NS - MARGIN_NS);
+    check_lines(qts, 0, 0, 0, 0, 0);
+    qtest_clock_step(qts, 2 * MARGIN_NS);
+    check_lines(qts, 0, 0, 0, 0, 1);
+    stop_direct(qts, kernel);
+}
+
+/*
+ * BRI = (RIE | REIE) & (BRK | ORER), shown through a loopback overrun
+ * with REIE alone; ERI = (RIE | REIE) & ER stays low, since no backend
+ * produces ER.
+ */
+static void test_irq_bri(void)
+{
+    char *kernel;
+    QTestState *qts = start_irq(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    qtest_writew(qts, b + FCR, FCR_LOOP);
+    loop_bytes(qts, "0123456789abcdefg", FRAME_8N1_NS);
+    check_lines(qts, 0, 0, 0, 0, 0);                    /* ORER, REIE = 0 */
+    qtest_writew(qts, b + SCR, SCR_FW | SCR_REIE);
+    check_lines(qts, 0, 1, 0, 0, 0);
+    qtest_readw(qts, b + LSR);
+    qtest_writew(qts, b + LSR, 0);                      /* clears ORER */
+    check_lines(qts, 0, 0, 0, 0, 0);
+    stop_direct(qts, kernel);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -564,6 +676,10 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/scif/rx-dr-timeout", test_rx_dr_timeout);
     qtest_add_func("/rzv2l-smarc/scif/rx-overrun", test_rx_overrun);
     qtest_add_func("/rzv2l-smarc/scif/rx-disabled", test_rx_disabled);
+    qtest_add_func("/rzv2l-smarc/scif/irq-txi", test_irq_txi);
+    qtest_add_func("/rzv2l-smarc/scif/irq-rxi", test_irq_rxi);
+    qtest_add_func("/rzv2l-smarc/scif/irq-tei-dri", test_irq_tei_dri);
+    qtest_add_func("/rzv2l-smarc/scif/irq-bri", test_irq_bri);
 
     return g_test_run();
 }
