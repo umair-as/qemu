@@ -38,6 +38,9 @@
  * with no such flow control; a byte that finds the FIFO full is lost and
  * sets LSR.ORER. Framing, parity and break are never seen.
  *
+ * The five interrupt lines are levels computed from the enable bits in
+ * SCR and the flags (Table 22.19).
+ *
  * Each register accepts only its documented access width. Any other
  * access to a register's bytes is answered with a decode error. Offsets
  * without a register read as 0 and ignore writes, as observed on the
@@ -57,6 +60,7 @@
 #include "qemu/module.h"
 #include "trace.h"
 #include "hw/core/sysbus.h"
+#include "hw/core/irq.h"
 #include "hw/core/registerfields.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
@@ -229,7 +233,7 @@ static unsigned rz_scifa_rx_trigger(RenesasRZSCIFAState *s)
 }
 
 /* Re-evaluate the level flags after any change */
-static void rz_scifa_update(RenesasRZSCIFAState *s)
+static void rz_scifa_update_flags(RenesasRZSCIFAState *s)
 {
     if (!FIELD_EX16(s->scr, SCR, TE) ||
         fifo8_num_used(&s->tx_fifo) <= rz_scifa_tx_trigger(s)) {
@@ -239,6 +243,34 @@ static void rz_scifa_update(RenesasRZSCIFAState *s)
     if (fifo8_num_used(&s->rx_fifo) > rz_scifa_rx_trigger(s)) {
         rz_scifa_set_flags(s, R_FSR_RDF_MASK);
     }
+}
+
+/* Interrupt request lines, Table 22.19 */
+static void rz_scifa_update_irq(RenesasRZSCIFAState *s)
+{
+    bool tie = FIELD_EX16(s->scr, SCR, TIE);
+    bool rie = FIELD_EX16(s->scr, SCR, RIE);
+    bool reie = FIELD_EX16(s->scr, SCR, REIE);
+    bool teie = FIELD_EX16(s->scr, SCR, TEIE);
+    bool er = FIELD_EX16(s->fsr, FSR, ER);
+    bool brk = FIELD_EX16(s->fsr, FSR, BRK);
+    bool orer = FIELD_EX16(s->lsr, LSR, ORER);
+
+    qemu_set_irq(s->irq[RENESAS_RZ_SCIFA_ERI], (rie || reie) && er);
+    qemu_set_irq(s->irq[RENESAS_RZ_SCIFA_BRI], (rie || reie) && (brk || orer));
+    qemu_set_irq(s->irq[RENESAS_RZ_SCIFA_RXI],
+                 rie && FIELD_EX16(s->fsr, FSR, RDF));
+    qemu_set_irq(s->irq[RENESAS_RZ_SCIFA_TXI],
+                 tie && FIELD_EX16(s->fsr, FSR, TDFE));
+    qemu_set_irq(s->irq[RENESAS_RZ_SCIFA_TEI_DRI],
+                 (teie && FIELD_EX16(s->fsr, FSR, TEND)) ||
+                 (rie && FIELD_EX16(s->fsr, FSR, DR)));
+}
+
+static void rz_scifa_update(RenesasRZSCIFAState *s)
+{
+    rz_scifa_update_flags(s);
+    rz_scifa_update_irq(s);
 }
 
 /*
@@ -303,6 +335,7 @@ static void rz_scifa_dr_timer_cb(void *opaque)
     if (count && count < rz_scifa_rx_trigger(s)) {
         rz_scifa_set_flags(s, R_FSR_DR_MASK);
     }
+    rz_scifa_update_irq(s);
 }
 
 static int rz_scifa_can_receive(void *opaque)
@@ -683,7 +716,12 @@ static void rz_scifa_reset_hold(Object *obj, ResetType type)
         s->fsr = FSR_DIRECT;
         s->semr = SEMR_DIRECT;
     }
-    rz_scifa_update(s);
+    rz_scifa_update_flags(s);
+}
+
+static void rz_scifa_reset_exit(Object *obj, ResetType type)
+{
+    rz_scifa_update_irq(RENESAS_RZ_SCIFA(obj));
 }
 
 static void rz_scifa_init(Object *obj)
@@ -694,6 +732,9 @@ static void rz_scifa_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &rz_scifa_ops, s,
                           TYPE_RENESAS_RZ_SCIFA, RENESAS_RZ_SCIFA_MMIO_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
+    for (int i = 0; i < RENESAS_RZ_SCIFA_NUM_IRQS; i++) {
+        sysbus_init_irq(sbd, &s->irq[i]);
+    }
     fifo8_create(&s->tx_fifo, RENESAS_RZ_SCIFA_FIFO_SIZE);
     s->tx_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, rz_scifa_tx_timer_cb, s);
     fifo8_create(&s->rx_fifo, RENESAS_RZ_SCIFA_FIFO_SIZE);
@@ -770,6 +811,7 @@ static void rz_scifa_class_init(ObjectClass *klass, const void *data)
     ResettableClass *rc = RESETTABLE_CLASS(klass);
 
     rc->phases.hold = rz_scifa_reset_hold;
+    rc->phases.exit = rz_scifa_reset_exit;
     dc->realize = rz_scifa_realize;
     dc->vmsd = &vmstate_rz_scifa;
     device_class_set_props(dc, rz_scifa_props);

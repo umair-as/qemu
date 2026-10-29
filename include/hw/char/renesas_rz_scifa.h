@@ -16,6 +16,8 @@
  *    the reset values. Default off. Set by the board when it loads a
  *    kernel directly, without running the firmware.
  *  + sysbus MMIO region 0: the channel's register bank
+ *  + sysbus IRQs 0-4: ERI, BRI, RXI, TXI and the shared TEI/DRI line,
+ *    all level (manual Table 22.19)
  */
 
 #ifndef HW_CHAR_RENESAS_RZ_SCIFA_H
@@ -33,6 +35,15 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZSCIFAState, RENESAS_RZ_SCIFA)
 #define RENESAS_RZ_SCIFA_MMIO_SIZE 0x400
 #define RENESAS_RZ_SCIFA_FIFO_SIZE 16
 
+enum {
+    RENESAS_RZ_SCIFA_ERI,
+    RENESAS_RZ_SCIFA_BRI,
+    RENESAS_RZ_SCIFA_RXI,
+    RENESAS_RZ_SCIFA_TXI,
+    RENESAS_RZ_SCIFA_TEI_DRI,
+    RENESAS_RZ_SCIFA_NUM_IRQS,
+};
+
 struct RenesasRZSCIFAState {
     /*< private >*/
     SysBusDevice parent_obj;
@@ -40,6 +51,7 @@ struct RenesasRZSCIFAState {
     /*< public >*/
     MemoryRegion iomem;
     CharFrontend chr;
+    qemu_irq irq[RENESAS_RZ_SCIFA_NUM_IRQS];
 
     /* Registers */
     uint16_t smr;
