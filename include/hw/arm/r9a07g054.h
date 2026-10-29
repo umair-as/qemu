@@ -12,6 +12,8 @@
  *    property; the board sets it when it loads a kernel directly
  *  + QOM property "cpg-direct-boot": alias of the CPG "direct-boot"
  *    property; the board sets it when it loads a kernel directly
+ *  + QOM property "pfc-direct-boot": alias of the PFC "direct-boot"
+ *    property; the board sets it when it loads a kernel directly
  *  + the SoC maps its devices into the system address space at realize
  */
 
@@ -24,6 +26,8 @@
 #include "hw/misc/renesas_rzv2l_cpg.h"
 #include "hw/char/renesas_rz_scifa.h"
 #include "hw/timer/renesas_rz_ostm.h"
+#include "hw/intc/renesas_rzg2l_irqc.h"
+#include "hw/gpio/renesas_rzg2l_pfc.h"
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
 #include "qemu/units.h"
@@ -52,6 +56,8 @@ struct R9A07G054State {
     RenesasRZV2LCPGState cpg;
     RenesasRZSCIFAState scif[R9A07G054_NUM_SCIF];
     RenesasRZOSTMState ostm[R9A07G054_NUM_OSTM];
+    RenesasRZG2LIRQCState irqc;
+    RenesasRZG2LPFCState pfc;
 };
 
 #endif

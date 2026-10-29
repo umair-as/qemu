@@ -7,10 +7,11 @@
 /*
  * Two Cortex-A55 cores, a GIC-600 (modelled by the GICv3), the Clock
  * Pulse Generator, the System Controller identification registers, the
- * five SCIFA serial ports and the three OS timers. A few blocks that a
- * kernel probes are stubbed (see r9a07g054_unimp). Everything else in
- * the address space is left unmapped, so guest accesses to blocks that
- * are not modelled yet fault instead of reading as zero.
+ * five SCIFA serial ports, the three OS timers, the pin function
+ * controller and the interrupt control unit's registers. A few blocks
+ * that a kernel probes are stubbed (see r9a07g054_unimp). Everything
+ * else in the address space is left unmapped, so guest accesses to
+ * blocks that are not modelled yet fault instead of reading as zero.
  */
 
 #include "qemu/osdep.h"
@@ -30,6 +31,8 @@ enum {
     R9A07G054_SCIF0,
     R9A07G054_CPG,
     R9A07G054_SYSC,
+    R9A07G054_PFC,
+    R9A07G054_IRQC,
     R9A07G054_OSTM0,
     R9A07G054_GIC_DIST,
     R9A07G054_GIC_REDIST,
@@ -39,6 +42,8 @@ static const hwaddr r9a07g054_memmap[] = {
     [R9A07G054_SCIF0]       = 0x1004b800,   /* SCIFn at + n * 0x400 */
     [R9A07G054_CPG]         = 0x11010000,
     [R9A07G054_SYSC]        = 0x11020000,
+    [R9A07G054_PFC]         = 0x11030000,
+    [R9A07G054_IRQC]        = 0x110a0000,
     [R9A07G054_OSTM0]       = 0x12801000,   /* OSTMn at + n * 0x400 */
     [R9A07G054_GIC_DIST]    = 0x11900000,
     [R9A07G054_GIC_REDIST]  = 0x11940000,
@@ -127,6 +132,12 @@ static void r9a07g054_init(Object *obj)
         object_initialize_child(obj, name, &s->scif[i], TYPE_RENESAS_RZ_SCIFA);
     }
     object_property_add_alias(obj, "scif0-direct-boot", OBJECT(&s->scif[0]),
+                              "direct-boot");
+
+    object_initialize_child(obj, "irqc", &s->irqc, TYPE_RENESAS_RZG2L_IRQC);
+
+    object_initialize_child(obj, "pfc", &s->pfc, TYPE_RENESAS_RZG2L_PFC);
+    object_property_add_alias(obj, "pfc-direct-boot", OBJECT(&s->pfc),
                               "direct-boot");
 
     for (i = 0; i < R9A07G054_NUM_OSTM; i++) {
@@ -238,6 +249,20 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysc), 0,
                     r9a07g054_memmap[R9A07G054_SYSC]);
+
+    /* PFC */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pfc), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pfc), 0,
+                    r9a07g054_memmap[R9A07G054_PFC]);
+
+    /* IRQC (IA55): registers only, no interrupt routing yet */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->irqc), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->irqc), 0,
+                    r9a07g054_memmap[R9A07G054_IRQC]);
 
     /* OSTM0-2 */
     for (i = 0; i < R9A07G054_NUM_OSTM; i++) {

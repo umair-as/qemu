@@ -67,12 +67,14 @@ static void rzv2l_smarc_init(MachineState *machine)
                              &error_fatal);
     /*
      * Without firmware, SCIF0 starts as the firmware would have left
-     * the console, and the CPG with the clocks and resets the firmware
-     * would have set up.
+     * the console, and the CPG and PFC with the clocks, resets and pin
+     * functions the firmware would have set up.
      */
     object_property_set_bool(OBJECT(&s->soc), "scif0-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "cpg-direct-boot",
+                             machine->kernel_filename != NULL, &error_fatal);
+    object_property_set_bool(OBJECT(&s->soc), "pfc-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
 
