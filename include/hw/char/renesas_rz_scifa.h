@@ -10,6 +10,7 @@
  * (R01UH0936EJ), section 22.
  *
  * QEMU interface:
+ *  + QOM property "chardev": the serial line
  *  + QOM property "direct-boot": start in the state the boot firmware
  *    leaves the console channel in (see renesas_rz_scifa.c), instead of
  *    the reset values. Default off. Set by the board when it loads a
@@ -21,12 +22,16 @@
 #define HW_CHAR_RENESAS_RZ_SCIFA_H
 
 #include "hw/core/sysbus.h"
+#include "chardev/char-fe.h"
+#include "qemu/fifo8.h"
+#include "qemu/timer.h"
 #include "qom/object.h"
 
 #define TYPE_RENESAS_RZ_SCIFA "renesas-rz-scifa"
 OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZSCIFAState, RENESAS_RZ_SCIFA)
 
 #define RENESAS_RZ_SCIFA_MMIO_SIZE 0x400
+#define RENESAS_RZ_SCIFA_FIFO_SIZE 16
 
 struct RenesasRZSCIFAState {
     /*< private >*/
@@ -34,6 +39,7 @@ struct RenesasRZSCIFAState {
 
     /*< public >*/
     MemoryRegion iomem;
+    CharFrontend chr;
 
     /* Registers */
     uint16_t smr;
@@ -41,11 +47,26 @@ struct RenesasRZSCIFAState {
     uint8_t mddr;
     uint16_t scr;
     uint16_t fsr;
+    uint16_t fsr_armed;     /* FSR flags read as 1 since they were set */
     uint16_t fcr;
     uint16_t sptr;
     uint16_t lsr;
+    uint16_t lsr_armed;     /* LSR.ORER read as 1 since it was set */
     uint8_t semr;
     uint16_t ftcr;
+
+    /* Transmitter */
+    Fifo8 tx_fifo;
+    uint8_t tsr;            /* transmit shift register */
+    bool tx_busy;           /* a frame is being shifted out */
+    bool tx_sent;           /* tsr has reached the chardev */
+    bool tx_frame_done;     /* the frame time of tsr has passed */
+    QEMUTimer *tx_timer;
+    guint tx_watch;
+
+    /* Receiver */
+    Fifo8 rx_fifo;
+    QEMUTimer *dr_timer;    /* 15 bit times after the last byte (FSR.DR) */
 
     /* Properties */
     bool direct_boot;
