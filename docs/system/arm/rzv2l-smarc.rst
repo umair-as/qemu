@@ -13,15 +13,17 @@ Supported devices
  * Generic Interrupt Controller (GICv3, identifying as an Arm GIC-600 r1p6)
  * System Controller (SYSC): the device ID, product and boot mode
    registers only
- * Serial ports SCIF0-4 (SCIFA), asynchronous mode, transmit only so far.
+ * Serial ports SCIF0-4 (SCIFA), asynchronous mode: transmit, receive,
+   loopback and the five interrupt lines.
    SCIF0 is the board console and takes the first ``-serial`` backend;
    SCIF1-4 take the next ones.
 
 Missing devices
 ---------------
 
-Every other on-chip block is missing. The serial ports do not receive
-yet, and they do not raise interrupts. Accesses to unmodelled addresses,
+Every other on-chip block is missing. The serial ports have no modem
+lines, break or error detection, and do not enforce the baud rate.
+Accesses to unmodelled addresses,
 and to SYSC registers other than the identification registers, fail
 with an external abort instead of reading as zero.
 

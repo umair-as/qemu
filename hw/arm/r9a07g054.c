@@ -60,6 +60,9 @@ static const uint64_t r9a07g054_mp_affinity[R9A07G054_NUM_CPUS] = {
 /* GICD_IIDR/GICR_IIDR of the Arm GIC-600 r1p6 */
 #define R9A07G054_GIC_IIDR      0x0201743b
 
+/* SCIF0 ERI, BRI, RXI, TXI, TEI/DRI are SPI 380-384; SCIFn follow */
+#define R9A07G054_SCIF0_SPI     380
+
 static void r9a07g054_init(Object *obj)
 {
     R9A07G054State *s = R9A07G054(obj);
@@ -186,6 +189,7 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     /* SCIF0-4 */
     for (i = 0; i < R9A07G054_NUM_SCIF; i++) {
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->scif[i]);
+        int j;
 
         qdev_prop_set_chr(DEVICE(sbd), "chardev", serial_hd(i));
         if (!sysbus_realize(sbd, errp)) {
@@ -193,6 +197,11 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
         }
         sysbus_mmio_map(sbd, 0, r9a07g054_memmap[R9A07G054_SCIF0] +
                         i * RENESAS_RZ_SCIFA_MMIO_SIZE);
+        for (j = 0; j < RENESAS_RZ_SCIFA_NUM_IRQS; j++) {
+            sysbus_connect_irq(sbd, j, qdev_get_gpio_in(gicdev,
+                               R9A07G054_SCIF0_SPI +
+                               i * RENESAS_RZ_SCIFA_NUM_IRQS + j));
+        }
     }
 }
 
