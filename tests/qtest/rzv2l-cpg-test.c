@@ -32,23 +32,33 @@
 #define CLKON_CA55          0x500
 #define CLKON_GIC600        0x514
 #define CLKON_IA55          0x518
+#define CLKON_SYC           0x528
 #define CLKON_GTM           0x534
 #define CLKON_WDT           0x548
+#define CLKON_DDR           0x54c
+#define CLKON_SPI_MULTI     0x550
 #define CLKON_SDHI          0x554
+#define CLKON_USB           0x578
 #define CLKON_SCIF          0x584
 #define CLKON_GPIO          0x598
 #define CLKON_MBUS          0x5b8
 #define CLKON_DRP           0x5e8
 #define RST_CA55            0x800
 #define RST_GIC600          0x814
+#define RST_SYC             0x828
 #define RST_GTM             0x834
 #define RST_WDT             0x848
 #define RST_DDR             0x84c
+#define RST_SPI             0x850
 #define RST_SDHI            0x854
+#define RST_USB             0x878
+#define RST_ETH             0x87c
+#define RST_I2C             0x880
 #define RST_SCIF            0x884
 #define RST_GPIO            0x898
 #define RST_DRP             0x8e8
 #define MON                 0x180   /* CLK_MON = CLK_ON + 0x180, likewise RST */
+#define MSTOP_MCPU1         0xb64
 #define MSTOP_MCPU2         0xb68
 #define MSTOP_REG0          0xb7c
 #define OTHERFUNC1          0xbe8
@@ -108,8 +118,10 @@ static const RegValue reset_values[] = {
 };
 
 /*
- * Post-firmware values read on the EVK (CPG rows R10-R19, R72 and the
- * full CLK_ON/CLK_MON and RST/RSTMON dumps X01, X02).
+ * Post-firmware values read on the EVK: every register the firmware
+ * leaves at a value other than its reset value, with its monitor
+ * (CPG rows R10-R19, R72 and the full CLK_ON/CLK_MON and RST/RSTMON
+ * dumps X01, X02).
  */
 static const RegValue post_firmware_values[] = {
     { SAMPLL1_CLK1, 0x00001901 },
@@ -122,16 +134,25 @@ static const RegValue post_firmware_values[] = {
     { PL3_SSEL, 0x00000011 },
     { CLKON_GIC600, 0x1 },       { CLKON_GIC600 + MON, 0x1 },
     { CLKON_IA55, 0x3 },         { CLKON_IA55 + MON, 0x3 },
+    { CLKON_SYC, 0x1 },          { CLKON_SYC + MON, 0x1 },
     { CLKON_GTM, 0 },            { CLKON_GTM + MON, 0 },
+    { CLKON_DDR, 0x3 },          { CLKON_DDR + MON, 0x3 },
+    { CLKON_SPI_MULTI, 0x3 },    { CLKON_SPI_MULTI + MON, 0x3 },
+    { CLKON_USB, 0xf },          { CLKON_USB + MON, 0xf },
     { CLKON_WDT, 0xff },         { CLKON_WDT + MON, 0x3f },
     { CLKON_SDHI, 0xff },        { CLKON_SDHI + MON, 0xff },
     { CLKON_SCIF, 0x1 },         { CLKON_SCIF + MON, 0x1 },
     { CLKON_GPIO, 0x1 },         { CLKON_GPIO + MON, 0x1 },
     { RST_GIC600, 0x3 },         { RST_GIC600 + MON, 0 },
+    { RST_SYC, 0x1 },            { RST_SYC + MON, 0 },
     { RST_GTM, 0x1 },            { RST_GTM + MON, 0x6 },
     { RST_WDT, 0xf },            { RST_WDT + MON, 0 },
     { RST_DDR, 0x7f },           { RST_DDR + MON, 0 },
+    { RST_SPI, 0x1 },            { RST_SPI + MON, 0 },
     { RST_SDHI, 0x3 },           { RST_SDHI + MON, 0 },
+    { RST_USB, 0xf },            { RST_USB + MON, 0 },
+    { RST_ETH, 0x3 },            { RST_ETH + MON, 0 },
+    { RST_I2C, 0xf },            { RST_I2C + MON, 0 },
     { RST_SCIF, 0x1 },           { RST_SCIF + MON, 0x1e },
     { RST_GPIO, 0x7 },           { RST_GPIO + MON, 0 },
     { RST_DRP, 0 },              { RST_DRP + MON, 0x1 },
@@ -180,6 +201,12 @@ static void test_direct_boot(void)
     g_assert(fd >= 0);
     close(fd);
     qts = qtest_initf("-machine rzv2l-smarc -kernel %s", kernel);
+    check_values(qts, post_firmware_values, ARRAY_SIZE(post_firmware_values));
+
+    /* A system reset brings back the post-firmware state, not Table 7.5 */
+    cpg_write(qts, CLKON_GTM, WEN(0x7) | 0x6);
+    cpg_write(qts, RST_SCIF, WEN(0x1));
+    qtest_system_reset(qts);
     check_values(qts, post_firmware_values, ARRAY_SIZE(post_firmware_values));
     qtest_quit(qts);
     unlink(kernel);
@@ -230,6 +257,19 @@ static void test_write_enable(void)
     g_assert_cmphex(cpg_read(qts, PL3_SSEL), ==, 0x011);
     cpg_write(qts, PL3C_SDIV, WEN(0xffff));
     g_assert_cmphex(cpg_read(qts, PL3C_SDIV), ==, 0x001);
+
+    /*
+     * MSTOP: one enable per bit. Bit 3 of CPG_BUS_MCPU1_MSTOP is
+     * reserved and reads 0 (7.2.4.191).
+     */
+    cpg_write(qts, MSTOP_MCPU1, WEN(0xffff) | 0xffff);
+    g_assert_cmphex(cpg_read(qts, MSTOP_MCPU1), ==, 0xfff7);
+    cpg_write(qts, MSTOP_MCPU1, WEN(0x0001));
+    g_assert_cmphex(cpg_read(qts, MSTOP_MCPU1), ==, 0xfff6);
+    cpg_write(qts, MSTOP_MCPU2, 0x0002);
+    g_assert_cmphex(cpg_read(qts, MSTOP_MCPU2), ==, 0);
+    cpg_write(qts, MSTOP_MCPU2, WEN(0x0002) | 0x0002);
+    g_assert_cmphex(cpg_read(qts, MSTOP_MCPU2), ==, 0x0002);
 
     /* CPG_SAMPLL1_CLK1 has no enables: DIV_K is bits 31:16 */
     cpg_write(qts, SAMPLL1_CLK1, 0xfffe1a42);
