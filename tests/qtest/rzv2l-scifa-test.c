@@ -414,6 +414,28 @@ static void test_tend_deferred(void)
 }
 
 /*
+ * TEND needs an empty FIFO, not just an idle shift register (22.2.7
+ * p.1281: "set to 1 when the FTDR register does not contain transmit
+ * data when the last bit ... is transmitted"). With TE cleared while a
+ * byte is still queued, the frame in flight ends, nothing follows, and
+ * TEND stays 0.
+ */
+static void test_tend_te_cleared(void)
+{
+    char *kernel;
+    QTestState *qts = start_direct(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    qtest_writeb(qts, b + FTDR, 'A');
+    qtest_writeb(qts, b + FTDR, 'B');
+    qtest_writew(qts, b + SCR, SCR_RE);
+    qtest_clock_step(qts, 2 * FRAME_8N1_NS + MARGIN_NS);
+    g_assert_cmphex(qtest_readw(qts, b + FDR), ==, 0x0100);
+    g_assert_cmphex(qtest_readw(qts, b + FSR) & FSR_TEND, ==, 0);
+    stop_direct(qts, kernel);
+}
+
+/*
  * Loopback (FCR.LOOP) feeds the receiver from the transmitter; a looped
  * byte arrives when its frame is done, so the receive timing is exact.
  */
@@ -673,6 +695,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/scif/ftdr-clears-tend",
                    test_ftdr_clears_tend);
     qtest_add_func("/rzv2l-smarc/scif/tend-deferred", test_tend_deferred);
+    qtest_add_func("/rzv2l-smarc/scif/tend-te-cleared",
+                   test_tend_te_cleared);
     qtest_add_func("/rzv2l-smarc/scif/rx-fifo", test_rx_fifo);
     qtest_add_func("/rzv2l-smarc/scif/rx-chardev", test_rx_chardev);
     qtest_add_func("/rzv2l-smarc/scif/rx-dr-timeout", test_rx_dr_timeout);

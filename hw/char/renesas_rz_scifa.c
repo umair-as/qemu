@@ -22,11 +22,12 @@
  * Transmission takes time: a byte moves from the 16-byte transmit FIFO
  * into the shift register, goes to the chardev, and the next byte
  * follows one frame time later, on the virtual clock. TEND is set when
- * the last frame is out and the FIFO is empty. Firmware that clears
- * TEND right after an FTDR write and then waits for it relies on this.
- * The frame time follows the programmed format and bit rate (section
- * 22.2.8 and 22.2.9 formulas, with a 100 MHz P0 clock); the bit rate is
- * not otherwise enforced.
+ * the last frame is out and the FIFO is empty; with TE cleared while
+ * bytes are still queued it stays 0 (section 22.2.7). Firmware that
+ * clears TEND right after an FTDR write and then waits for it relies on
+ * this. The frame time follows the programmed format and bit rate
+ * (section 22.2.8 and 22.2.9 formulas, with a 100 MHz P0 clock); the
+ * bit rate is not otherwise enforced.
  *
  * Reception: bytes from the chardev enter the 16-byte receive FIFO. RDF
  * is set when the FIFO reaches the receive trigger, cleared by an FRDR
@@ -441,7 +442,8 @@ static void rz_scifa_tx_complete(RenesasRZSCIFAState *s)
     s->tx_busy = false;
     s->tx_frame_done = false;
     rz_scifa_tx_start(s);
-    if (!s->tx_busy) {
+    /* TEND needs an empty FIFO, not just an idle shift register */
+    if (!s->tx_busy && fifo8_is_empty(&s->tx_fifo)) {
         rz_scifa_set_flags(s, R_FSR_TEND_MASK);
     }
     rz_scifa_update(s);
