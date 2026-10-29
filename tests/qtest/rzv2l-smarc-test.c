@@ -175,6 +175,29 @@ static void test_gic_identity(void)
     qtest_quit(qts);
 }
 
+/*
+ * Stubbed blocks: the DMA controller keeps what the driver writes
+ * (DMA channel 0 CHCTRL at +0x28, DMARS at +0x0 of the second window);
+ * the USB PHY control and thermal sensor windows read as zero.
+ */
+static void test_stubs(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    qtest_writel(qts, 0x11820028, 0x0002027a);
+    g_assert_cmphex(qtest_readl(qts, 0x11820028), ==, 0x0002027a);
+    qtest_writel(qts, 0x11830000, 0x12345678);
+    g_assert_cmphex(qtest_readl(qts, 0x11830000), ==, 0x12345678);
+    qtest_system_reset(qts);
+    g_assert_cmphex(qtest_readl(qts, 0x11820028), ==, 0);
+
+    qtest_writel(qts, 0x11c40000, 0x303);
+    g_assert_cmphex(qtest_readl(qts, 0x11c40000), ==, 0);
+    qtest_writel(qts, 0x10059404, 0x1);
+    g_assert_cmphex(qtest_readl(qts, 0x10059404), ==, 0);
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -185,6 +208,7 @@ int main(int argc, char **argv)
                    test_sysc_boot_mode_reserved);
     qtest_add_func("/rzv2l-smarc/gic/layout", test_gic_layout);
     qtest_add_func("/rzv2l-smarc/gic/identity", test_gic_identity);
+    qtest_add_func("/rzv2l-smarc/stubs", test_stubs);
 
     return g_test_run();
 }

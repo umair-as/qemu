@@ -7,7 +7,8 @@
 /*
  * Two Cortex-A55 cores, a GIC-600 (modelled by the GICv3), the Clock
  * Pulse Generator, the System Controller identification registers and
- * the five SCIFA serial ports. Everything else in the
+ * the five SCIFA serial ports. A few blocks that a kernel probes are
+ * stubbed (see r9a07g054_unimp). Everything else in the
  * address space is left unmapped, so guest accesses to blocks that are
  * not modelled yet fault instead of reading as zero.
  */
@@ -23,6 +24,7 @@
 #include "qapi/error.h"
 #include "qobject/qlist.h"
 #include "system/system.h"
+#include "hw/misc/unimp.h"
 
 enum {
     R9A07G054_SCIF0,
@@ -65,6 +67,24 @@ static const uint64_t r9a07g054_mp_affinity[R9A07G054_NUM_CPUS] = {
 
 /* SCIF0 ERI, BRI, RXI, TXI, TEI/DRI are SPI 380-384; SCIFn follow */
 #define R9A07G054_SCIF0_SPI     380
+
+/*
+ * Blocks that are not modelled but that a kernel probes. Each one logs
+ * every access. Reads return 0, or with retain_writes the last value
+ * written: the DMA controller driver writes its channel registers at
+ * probe and only reads them back to run a transfer.
+ */
+static const struct {
+    const char *name;
+    hwaddr base;
+    hwaddr size;
+    bool retain_writes;
+} r9a07g054_unimp[] = {
+    { "rz-dmac",        0x11820000, 0x10000, true },
+    { "rz-dmac-ext",    0x11830000, 0x10000, true },
+    { "usbphy-ctrl",    0x11c40000, 0x10000, false },
+    { "tsu",            0x10059400, 0x400,   false },
+};
 
 static void r9a07g054_init(Object *obj)
 {
@@ -199,6 +219,21 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysc), 0,
                     r9a07g054_memmap[R9A07G054_SYSC]);
+
+    /* Unimplemented blocks */
+    for (i = 0; i < ARRAY_SIZE(r9a07g054_unimp); i++) {
+        DeviceState *unimp = qdev_new(TYPE_UNIMPLEMENTED_DEVICE);
+
+        qdev_prop_set_string(unimp, "name", r9a07g054_unimp[i].name);
+        qdev_prop_set_uint64(unimp, "size", r9a07g054_unimp[i].size);
+        qdev_prop_set_bit(unimp, "retain-writes",
+                          r9a07g054_unimp[i].retain_writes);
+        if (!sysbus_realize_and_unref(SYS_BUS_DEVICE(unimp), errp)) {
+            return;
+        }
+        sysbus_mmio_map_overlap(SYS_BUS_DEVICE(unimp), 0,
+                                r9a07g054_unimp[i].base, -1000);
+    }
 
     /* SCIF0-4 */
     for (i = 0; i < R9A07G054_NUM_SCIF; i++) {
