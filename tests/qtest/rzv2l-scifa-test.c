@@ -104,7 +104,11 @@
 #define SCR_REIE        0x0008
 #define SCR_TEIE        0x0004
 
-/* Interrupt outputs of a SCIF channel, in order (Table 22.19) */
+/*
+ * Interrupt outputs of a SCIF channel, in SPI order (Table 8.2 p.544:
+ * ERI0 380, BRI0 381, RXI0 382, TXI0 383, TEI0_DRI0 384; the DT lists
+ * the same lines as eri, rxi, txi, bri, dri, tei)
+ */
 enum { ERI, BRI, RXI, TXI, TEI_DRI };
 
 #define FRAME_8N1_NS    87080
