@@ -65,6 +65,12 @@ static void rzv2l_smarc_init(MachineState *machine)
                              &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "debugen", s->debugen,
                              &error_fatal);
+    /*
+     * Without firmware, SCIF0 starts as the firmware would have left
+     * the console.
+     */
+    object_property_set_bool(OBJECT(&s->soc), "scif0-direct-boot",
+                             machine->kernel_filename != NULL, &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
 
     memory_region_add_subregion(get_system_memory(), R9A07G054_DDR_BASE,

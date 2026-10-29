@@ -23,12 +23,14 @@
 #include "qobject/qlist.h"
 
 enum {
+    R9A07G054_SCIF0,
     R9A07G054_SYSC,
     R9A07G054_GIC_DIST,
     R9A07G054_GIC_REDIST,
 };
 
 static const hwaddr r9a07g054_memmap[] = {
+    [R9A07G054_SCIF0]       = 0x1004b800,   /* SCIFn at + n * 0x400 */
     [R9A07G054_SYSC]        = 0x11020000,
     [R9A07G054_GIC_DIST]    = 0x11900000,
     [R9A07G054_GIC_REDIST]  = 0x11940000,
@@ -74,6 +76,14 @@ static void r9a07g054_init(Object *obj)
     object_property_add_alias(obj, "boot-mode", OBJECT(&s->sysc),
                               "boot-mode");
     object_property_add_alias(obj, "debugen", OBJECT(&s->sysc), "debugen");
+
+    for (i = 0; i < R9A07G054_NUM_SCIF; i++) {
+        g_autofree char *name = g_strdup_printf("scif%d", i);
+
+        object_initialize_child(obj, name, &s->scif[i], TYPE_RENESAS_RZ_SCIFA);
+    }
+    object_property_add_alias(obj, "scif0-direct-boot", OBJECT(&s->scif[0]),
+                              "direct-boot");
 }
 
 static void r9a07g054_realize(DeviceState *dev, Error **errp)
@@ -171,6 +181,17 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysc), 0,
                     r9a07g054_memmap[R9A07G054_SYSC]);
+
+    /* SCIF0-4 */
+    for (i = 0; i < R9A07G054_NUM_SCIF; i++) {
+        SysBusDevice *sbd = SYS_BUS_DEVICE(&s->scif[i]);
+
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        sysbus_mmio_map(sbd, 0, r9a07g054_memmap[R9A07G054_SCIF0] +
+                        i * RENESAS_RZ_SCIFA_MMIO_SIZE);
+    }
 }
 
 static void r9a07g054_class_init(ObjectClass *oc, const void *data)
