@@ -254,6 +254,9 @@ config IOSB
 config RENESAS_RZG2L_SYSC
     bool
 
+config RENESAS_RZV2L_CPG
+    bool
+
 config XLNX_VERSAL_TRNG
     bool
 
