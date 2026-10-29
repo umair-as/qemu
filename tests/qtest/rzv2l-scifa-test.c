@@ -466,9 +466,11 @@ static void test_rx_chardev(void)
     args = g_strdup_printf("-machine rzv2l-smarc -kernel %s", kernel);
     qts = qtest_init_with_serial(args, &sock);
     g_assert_true(send(sock, "xyz", 3, 0) == 3);
-    while ((qtest_readw(qts, b + FDR) & 0x1f) < 3) {
+    /* the bytes arrive through QEMU's main loop: wait up to 5 s */
+    for (int i = 0; i < 5000 && (qtest_readw(qts, b + FDR) & 0x1f) < 3; i++) {
         g_usleep(1000);
     }
+    g_assert_cmphex(qtest_readw(qts, b + FDR), ==, 3);
     g_assert_cmphex(qtest_readw(qts, b + FSR) & FSR_RDF, ==, FSR_RDF);
     g_assert_cmphex(qtest_readb(qts, b + FRDR), ==, 'x');
     g_assert_cmphex(qtest_readb(qts, b + FRDR), ==, 'y');
