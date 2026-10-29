@@ -23,6 +23,7 @@
 #include "hw/misc/renesas_rzg2l_sysc.h"
 #include "hw/misc/renesas_rzv2l_cpg.h"
 #include "hw/char/renesas_rz_scifa.h"
+#include "hw/timer/renesas_rz_ostm.h"
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
 #include "qemu/units.h"
@@ -37,6 +38,7 @@ enum {
     /* Shared peripheral interrupts, INTID 32-511 */
     R9A07G054_NUM_SPIS  = 480,
     R9A07G054_NUM_SCIF  = 5,
+    R9A07G054_NUM_OSTM  = 3,
 };
 
 struct R9A07G054State {
@@ -49,6 +51,7 @@ struct R9A07G054State {
     RenesasRZG2LSysCState sysc;
     RenesasRZV2LCPGState cpg;
     RenesasRZSCIFAState scif[R9A07G054_NUM_SCIF];
+    RenesasRZOSTMState ostm[R9A07G054_NUM_OSTM];
 };
 
 #endif
