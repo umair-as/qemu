@@ -17,7 +17,8 @@
  * - interval timer mode (CTL.MD1 = 0) counts down from CMP and requests
  *   an interrupt every (CMP + 1) count clocks, reloading CMP each time
  *   (section 20.3.5.1). With CMP = 0 the request stays asserted while
- *   the counter runs (section 20.3.5.2).
+ *   the counter runs, whatever CTL.MD0 is (section 20.3.5.2; the manual
+ *   can also be read as MD0 = 0 suppressing it).
  * A request is a pulse on the IRQ line, which the SoC wires to an
  * edge-triggered interrupt.
  *
