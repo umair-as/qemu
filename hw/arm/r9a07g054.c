@@ -102,6 +102,15 @@ static const struct {
     { "rz-dmac-ext",    0x11830000, 0x10000, true },
     { "usbphy-ctrl",    0x11c40000, 0x10000, true },
     { "tsu",            0x10059400, 0x400,   false },
+    { "ravb-eth0",      0x11c20000, 0x10000, false },
+    { "ravb-eth1",      0x11c30000, 0x10000, false },
+    { "riic0",          0x10058000, 0x400,   false },
+    { "riic1",          0x10058400, 0x400,   false },
+    { "riic3",          0x10058c00, 0x400,   false },
+    { "usb0-host",      0x11c50000, 0x10000, false },
+    { "usb1-host",      0x11c70000, 0x10000, false },
+    { "sdhi0",          0x11c00000, 0x10000, false },
+    { "sdhi1",          0x11c10000, 0x10000, false },
 };
 
 static void r9a07g054_init(Object *obj)
