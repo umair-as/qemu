@@ -109,6 +109,16 @@ enum { ERI, BRI, RXI, TXI, TEI_DRI };
 
 #define FRAME_8N1_NS    87080
 #define FRAME_7E2_NS    95790
+/*
+ * The same 10-bit frame with SMR.CKS = 1 (n = 1, base clock P0/4):
+ *   bit time = 64 * 2^1 * 27 / 100 MHz * 256 / 254 = 34.832 us
+ * and, back at n = 0, with BRR = 0x35 (N + 1 = 54):
+ *   bit time = 64 * 2^-1 * 54 / 100 MHz * 256 / 254 = 17.416 us
+ */
+#define FRAME_8N1_CKS1_NS   348320
+#define FRAME_8N1_BRR35_NS  174160
+#define SMR_CKS1            0x0001
+#define BRR_54              0x35
 /* DR: 15 bit times (ETU) after the last stop bit (22.2.7, p.1279) */
 #define DR_DELAY_NS     130620
 #define MARGIN_NS       200     /* below the MDDR correction, 680 ns */
@@ -410,6 +420,14 @@ static void test_tend_deferred(void)
 
     qtest_writew(qts, b + SMR, SMR_CHR | SMR_PE | SMR_STOP);
     check_tend_after(qts, 1, FRAME_7E2_NS);
+
+    /* the divider: CKS = 1 quadruples the bit time, BRR 0x35 doubles it */
+    qtest_writew(qts, b + SMR, SMR_CKS1);
+    check_tend_after(qts, 1, FRAME_8N1_CKS1_NS);
+    qtest_writew(qts, b + SMR, SMR_FW);
+    qtest_writeb(qts, b + SEMR, SEMR_FW & ~SEMR_MDDRS);
+    qtest_writeb(qts, b + BRR, BRR_54);
+    check_tend_after(qts, 1, FRAME_8N1_BRR35_NS);
     stop_direct(qts, kernel);
 }
 
