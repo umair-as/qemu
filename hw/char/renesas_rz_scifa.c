@@ -37,7 +37,8 @@
  * From the chardev the FIFO cannot overflow: the host is held off when
  * it is full. In loopback (FCR.LOOP) the transmitter feeds the receiver
  * with no such flow control; a byte that finds the FIFO full is lost and
- * sets LSR.ORER. Framing, parity and break are never seen.
+ * sets LSR.ORER, and the receiver then drops everything until ORER is
+ * cleared (section 22.2.13). Framing, parity and break are never seen.
  *
  * The five interrupt lines are levels computed from the enable bits in
  * SCR and the flags (Table 22.19).
@@ -311,6 +312,10 @@ static void rz_scifa_rx_byte(RenesasRZSCIFAState *s, uint8_t byte)
     if (!FIELD_EX16(s->scr, SCR, RE) || FIELD_EX16(s->fcr, FCR, RFRST)) {
         return;
     }
+    /* an overrun stops the receiver until ORER is cleared */
+    if (s->lsr & R_LSR_ORER_MASK) {
+        return;
+    }
     if (fifo8_is_full(&s->rx_fifo)) {
         if (!(s->lsr & R_LSR_ORER_MASK)) {
             s->lsr |= R_LSR_ORER_MASK;
@@ -343,7 +348,8 @@ static int rz_scifa_can_receive(void *opaque)
 {
     RenesasRZSCIFAState *s = opaque;
 
-    if (!FIELD_EX16(s->scr, SCR, RE) || FIELD_EX16(s->fcr, FCR, RFRST)) {
+    if (!FIELD_EX16(s->scr, SCR, RE) || FIELD_EX16(s->fcr, FCR, RFRST) ||
+        (s->lsr & R_LSR_ORER_MASK)) {
         return 1;       /* the line is not sampled: the byte is lost */
     }
     return fifo8_num_free(&s->rx_fifo);

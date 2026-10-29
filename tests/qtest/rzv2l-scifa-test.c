@@ -556,6 +556,30 @@ static void test_rx_overrun(void)
     stop_direct(qts, kernel);
 }
 
+/*
+ * While ORER is set the receiver is stopped (22.2.13 p.1296: "the SCIFA
+ * cannot continue subsequent serial reception"; 22.4.2, the overrun
+ * check before a byte is stored). Freeing a FIFO slot does not restart
+ * it; clearing ORER does.
+ */
+static void test_rx_stopped_by_orer(void)
+{
+    char *kernel;
+    QTestState *qts = start_direct(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    qtest_writew(qts, b + FCR, FCR_LOOP);
+    loop_bytes(qts, "0123456789abcdefg", FRAME_8N1_NS);
+    g_assert_cmphex(qtest_readb(qts, b + FRDR), ==, '0');
+    loop_bytes(qts, "h", FRAME_8N1_NS);
+    g_assert_cmphex(qtest_readw(qts, b + FDR), ==, 15);
+    g_assert_cmphex(qtest_readw(qts, b + LSR), ==, LSR_ORER);
+    qtest_writew(qts, b + LSR, 0);
+    loop_bytes(qts, "i", FRAME_8N1_NS);
+    g_assert_cmphex(qtest_readw(qts, b + FDR), ==, 16);
+    stop_direct(qts, kernel);
+}
+
 /* With RE = 0 the receiver ignores the line */
 static void test_rx_disabled(void)
 {
@@ -701,6 +725,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/scif/rx-chardev", test_rx_chardev);
     qtest_add_func("/rzv2l-smarc/scif/rx-dr-timeout", test_rx_dr_timeout);
     qtest_add_func("/rzv2l-smarc/scif/rx-overrun", test_rx_overrun);
+    qtest_add_func("/rzv2l-smarc/scif/rx-stopped-by-orer",
+                   test_rx_stopped_by_orer);
     qtest_add_func("/rzv2l-smarc/scif/rx-disabled", test_rx_disabled);
     qtest_add_func("/rzv2l-smarc/scif/irq-txi", test_irq_txi);
     qtest_add_func("/rzv2l-smarc/scif/irq-rxi", test_irq_rxi);
