@@ -6,8 +6,9 @@
 
 /*
  * The clock, reset and module-stop registers of manual Table 7.5, plus
- * the PLL1 setting registers, the dividers and the selectors. Reset
- * values, writable bits and write-enable bits come from the register
+ * the PLL1 setting registers, the dividers, the selectors and the two
+ * other-function registers (PLL5_4 source selection). Reset values,
+ * writable bits and write-enable bits come from the register
  * descriptions in section 7.2.4.
  *
  * - A field is written only when its write-enable bit (16 above the
