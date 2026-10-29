@@ -72,7 +72,8 @@ static const uint64_t r9a07g054_mp_affinity[R9A07G054_NUM_CPUS] = {
  * Blocks that are not modelled but that a kernel probes. Each one logs
  * every access. Reads return 0, or with retain_writes the last value
  * written: the DMA controller driver writes its channel registers at
- * probe and only reads them back to run a transfer.
+ * probe and only reads them back to run a transfer; the USB PHY control
+ * driver sets and clears reset bits with read-modify-writes.
  */
 static const struct {
     const char *name;
@@ -82,7 +83,7 @@ static const struct {
 } r9a07g054_unimp[] = {
     { "rz-dmac",        0x11820000, 0x10000, true },
     { "rz-dmac-ext",    0x11830000, 0x10000, true },
-    { "usbphy-ctrl",    0x11c40000, 0x10000, false },
+    { "usbphy-ctrl",    0x11c40000, 0x10000, true },
     { "tsu",            0x10059400, 0x400,   false },
 };
 

@@ -176,9 +176,9 @@ static void test_gic_identity(void)
 }
 
 /*
- * Stubbed blocks: the DMA controller keeps what the driver writes
- * (DMA channel 0 CHCTRL at +0x28, DMARS at +0x0 of the second window);
- * the USB PHY control and thermal sensor windows read as zero.
+ * Stubbed blocks: the DMA controller (DMA channel 0 CHCTRL at +0x28,
+ * DMARS at +0x0 of the second window) and the USB PHY control (RESET at
+ * +0x0) keep what the driver writes; the thermal sensor reads as zero.
  */
 static void test_stubs(void)
 {
@@ -188,11 +188,12 @@ static void test_stubs(void)
     g_assert_cmphex(qtest_readl(qts, 0x11820028), ==, 0x0002027a);
     qtest_writel(qts, 0x11830000, 0x12345678);
     g_assert_cmphex(qtest_readl(qts, 0x11830000), ==, 0x12345678);
+    qtest_writel(qts, 0x11c40000, 0x303);
+    g_assert_cmphex(qtest_readl(qts, 0x11c40000), ==, 0x303);
     qtest_system_reset(qts);
     g_assert_cmphex(qtest_readl(qts, 0x11820028), ==, 0);
-
-    qtest_writel(qts, 0x11c40000, 0x303);
     g_assert_cmphex(qtest_readl(qts, 0x11c40000), ==, 0);
+
     qtest_writel(qts, 0x10059404, 0x1);
     g_assert_cmphex(qtest_readl(qts, 0x10059404), ==, 0);
     qtest_quit(qts);
