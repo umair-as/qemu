@@ -21,6 +21,7 @@
 #include "target/arm/gtimer.h"
 #include "qapi/error.h"
 #include "qobject/qlist.h"
+#include "system/system.h"
 
 enum {
     R9A07G054_SCIF0,
@@ -186,6 +187,7 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     for (i = 0; i < R9A07G054_NUM_SCIF; i++) {
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->scif[i]);
 
+        qdev_prop_set_chr(DEVICE(sbd), "chardev", serial_hd(i));
         if (!sysbus_realize(sbd, errp)) {
             return;
         }

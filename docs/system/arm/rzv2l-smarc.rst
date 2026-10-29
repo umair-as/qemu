@@ -13,14 +13,22 @@ Supported devices
  * Generic Interrupt Controller (GICv3, identifying as an Arm GIC-600 r1p6)
  * System Controller (SYSC): the device ID, product and boot mode
    registers only
+ * Serial ports SCIF0-4 (SCIFA), asynchronous mode, transmit only so far.
+   SCIF0 is the board console and takes the first ``-serial`` backend;
+   SCIF1-4 take the next ones.
 
 Missing devices
 ---------------
 
-Every other on-chip block is missing, including the UARTs, so the
-machine has no console yet. Accesses to unmodelled addresses, and to
-SYSC registers other than the identification registers, fail with an
-external abort instead of reading as zero.
+Every other on-chip block is missing. The serial ports do not receive
+yet, and they do not raise interrupts. Accesses to unmodelled addresses,
+and to SYSC registers other than the identification registers, fail
+with an external abort instead of reading as zero.
+
+When a kernel is loaded with ``-kernel``, SCIF0 starts in the state the
+board's boot firmware leaves the console in (115200 8N1, transmitter and
+receiver enabled), so the kernel's early console works without the
+firmware.
 
 Machine options
 ---------------
