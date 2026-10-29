@@ -5,8 +5,9 @@
  */
 
 /*
- * Two Cortex-A55 cores, a GIC-600 (modelled by the GICv3) and the
- * System Controller identification registers. Everything else in the
+ * Two Cortex-A55 cores, a GIC-600 (modelled by the GICv3), the Clock
+ * Pulse Generator, the System Controller identification registers and
+ * the five SCIFA serial ports. Everything else in the
  * address space is left unmapped, so guest accesses to blocks that are
  * not modelled yet fault instead of reading as zero.
  */
@@ -25,6 +26,7 @@
 
 enum {
     R9A07G054_SCIF0,
+    R9A07G054_CPG,
     R9A07G054_SYSC,
     R9A07G054_GIC_DIST,
     R9A07G054_GIC_REDIST,
@@ -32,6 +34,7 @@ enum {
 
 static const hwaddr r9a07g054_memmap[] = {
     [R9A07G054_SCIF0]       = 0x1004b800,   /* SCIFn at + n * 0x400 */
+    [R9A07G054_CPG]         = 0x11010000,
     [R9A07G054_SYSC]        = 0x11020000,
     [R9A07G054_GIC_DIST]    = 0x11900000,
     [R9A07G054_GIC_REDIST]  = 0x11940000,
@@ -75,6 +78,10 @@ static void r9a07g054_init(Object *obj)
     }
 
     object_initialize_child(obj, "gic", &s->gic, gicv3_class_name());
+
+    object_initialize_child(obj, "cpg", &s->cpg, TYPE_RENESAS_RZV2L_CPG);
+    object_property_add_alias(obj, "cpg-direct-boot", OBJECT(&s->cpg),
+                              "direct-boot");
 
     object_initialize_child(obj, "sysc", &s->sysc, TYPE_RENESAS_RZG2L_SYSC);
     object_property_add_alias(obj, "boot-mode", OBJECT(&s->sysc),
@@ -175,6 +182,13 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
         sysbus_connect_irq(gicsbd, i + 3 * R9A07G054_NUM_CPUS,
                            qdev_get_gpio_in(cpudev, ARM_CPU_VFIQ));
     }
+
+    /* CPG */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->cpg), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->cpg), 0,
+                    r9a07g054_memmap[R9A07G054_CPG]);
 
     /* SYSC */
     qdev_prop_set_uint32(DEVICE(&s->sysc), "lsi-devid", R9A07G054_LSI_DEVID);

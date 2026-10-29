@@ -628,6 +628,7 @@ config R9A07G054
     bool
     select ARM_GIC
     select RENESAS_RZG2L_SYSC
+    select RENESAS_RZV2L_CPG
     select RENESAS_RZ_SCIFA
 
 config FSL_IMX8MP_EVK

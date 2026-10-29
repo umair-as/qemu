@@ -10,6 +10,8 @@
  *  + QOM property "debugen": alias of the SYSC "debugen" property
  *  + QOM property "scif0-direct-boot": alias of the SCIF0 "direct-boot"
  *    property; the board sets it when it loads a kernel directly
+ *  + QOM property "cpg-direct-boot": alias of the CPG "direct-boot"
+ *    property; the board sets it when it loads a kernel directly
  *  + the SoC maps its devices into the system address space at realize
  */
 
@@ -19,6 +21,7 @@
 #include "target/arm/cpu.h"
 #include "hw/intc/arm_gicv3_common.h"
 #include "hw/misc/renesas_rzg2l_sysc.h"
+#include "hw/misc/renesas_rzv2l_cpg.h"
 #include "hw/char/renesas_rz_scifa.h"
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
@@ -44,6 +47,7 @@ struct R9A07G054State {
     ARMCPU cpu[R9A07G054_NUM_CPUS];
     GICv3State gic;
     RenesasRZG2LSysCState sysc;
+    RenesasRZV2LCPGState cpg;
     RenesasRZSCIFAState scif[R9A07G054_NUM_SCIF];
 };
 
