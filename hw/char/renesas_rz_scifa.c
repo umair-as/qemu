@@ -27,7 +27,9 @@
  * clears TEND right after an FTDR write and then waits for it relies on
  * this. The frame time follows the programmed format and bit rate
  * (section 22.2.8 and 22.2.9 formulas, with a 100 MHz P0 clock); the
- * bit rate is not otherwise enforced.
+ * bit rate is not otherwise enforced. A 7-bit frame (SMR.CHR) carries
+ * bits 6..0 of the byte; the receive side of 7-bit mode is not modelled
+ * and passes host bytes through unchanged.
  *
  * Reception: bytes from the chardev enter the 16-byte receive FIFO. RDF
  * is set when the FIFO reaches the receive trigger, cleared by an FRDR
@@ -432,6 +434,10 @@ static void rz_scifa_tx_start(RenesasRZSCIFAState *s)
         return;
     }
     s->tsr = fifo8_pop(&s->tx_fifo);
+    /* a 7-bit frame does not carry bit 7 (SMR note 3) */
+    if (FIELD_EX16(s->smr, SMR, CHR)) {
+        s->tsr &= 0x7f;
+    }
     s->tx_busy = true;
     s->tx_frame_done = false;
     rz_scifa_tx_send(s);

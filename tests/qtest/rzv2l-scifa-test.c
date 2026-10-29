@@ -580,6 +580,28 @@ static void test_rx_stopped_by_orer(void)
     stop_direct(qts, kernel);
 }
 
+/*
+ * In 7-bit mode bit 7 of the FTDR byte is not transmitted (22.2.5
+ * p.1274, note 3); in 8-bit mode it is. Seen through loopback.
+ */
+static void test_tx_7bit(void)
+{
+    char *kernel;
+    QTestState *qts = start_direct(&kernel);
+    uint64_t b = SCIF_BASE(0);
+
+    qtest_writew(qts, b + FCR, FCR_LOOP);
+    qtest_writeb(qts, b + FTDR, 0xc1);
+    qtest_clock_step(qts, FRAME_8N1_NS + MARGIN_NS);
+    g_assert_cmphex(qtest_readb(qts, b + FRDR), ==, 0xc1);
+
+    qtest_writew(qts, b + SMR, SMR_CHR | SMR_PE | SMR_STOP);
+    qtest_writeb(qts, b + FTDR, 0xc1);
+    qtest_clock_step(qts, FRAME_7E2_NS + MARGIN_NS);
+    g_assert_cmphex(qtest_readb(qts, b + FRDR), ==, 0x41);
+    stop_direct(qts, kernel);
+}
+
 /* With RE = 0 the receiver ignores the line */
 static void test_rx_disabled(void)
 {
@@ -727,6 +749,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/scif/rx-overrun", test_rx_overrun);
     qtest_add_func("/rzv2l-smarc/scif/rx-stopped-by-orer",
                    test_rx_stopped_by_orer);
+    qtest_add_func("/rzv2l-smarc/scif/tx-7bit", test_tx_7bit);
     qtest_add_func("/rzv2l-smarc/scif/rx-disabled", test_rx_disabled);
     qtest_add_func("/rzv2l-smarc/scif/irq-txi", test_irq_txi);
     qtest_add_func("/rzv2l-smarc/scif/irq-rxi", test_irq_rxi);
