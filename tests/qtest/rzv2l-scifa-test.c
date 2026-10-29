@@ -123,6 +123,19 @@ enum { ERI, BRI, RXI, TXI, TEI_DRI };
 #define FRAME_8N1_BRR35_NS  174160
 #define SMR_CKS1            0x0001
 #define BRR_54              0x35
+/*
+ * SEMR.ABCS0 or SEMR.BGDM alone doubles the bit rate, both together
+ * quadruple it (22.2.8 p.1284 note; the model's K = 64, 32 or 16), so
+ * at n = 0, BRR 0x1A: 43.540 us and 21.770 us per 10-bit frame. CKS = 3
+ * (n = 3, base clock P0/64) multiplies the bit time by 64:
+ *   64 * 2^5 * 27 / 100 MHz * 256 / 254 = 557.314 us, 5573.14 us a frame
+ */
+#define FRAME_8N1_X2_NS     43540
+#define FRAME_8N1_X4_NS     21770
+#define FRAME_8N1_CKS3_NS   5573140
+#define SMR_CKS3            0x0003
+#define SEMR_ABCS0          0x01
+#define SEMR_BGDM           0x80
 /* DR: 15 bit times (ETU) after the last stop bit (22.2.7, p.1279) */
 #define DR_DELAY_NS     130620
 #define MARGIN_NS       200     /* below the MDDR correction, 680 ns */
@@ -428,7 +441,17 @@ static void test_tend_deferred(void)
     /* the divider: CKS = 1 quadruples the bit time, BRR 0x35 doubles it */
     qtest_writew(qts, b + SMR, SMR_CKS1);
     check_tend_after(qts, 1, FRAME_8N1_CKS1_NS);
+    qtest_writew(qts, b + SMR, SMR_CKS3);
+    check_tend_after(qts, 1, FRAME_8N1_CKS3_NS);
     qtest_writew(qts, b + SMR, SMR_FW);
+
+    /* the base clock: ABCS0 or BGDM halves the bit time, both quarter it */
+    qtest_writeb(qts, b + SEMR, SEMR_FW | SEMR_ABCS0);
+    check_tend_after(qts, 1, FRAME_8N1_X2_NS);
+    qtest_writeb(qts, b + SEMR, SEMR_FW | SEMR_BGDM);
+    check_tend_after(qts, 1, FRAME_8N1_X2_NS);
+    qtest_writeb(qts, b + SEMR, SEMR_FW | SEMR_ABCS0 | SEMR_BGDM);
+    check_tend_after(qts, 1, FRAME_8N1_X4_NS);
     qtest_writeb(qts, b + SEMR, SEMR_FW & ~SEMR_MDDRS);
     qtest_writeb(qts, b + BRR, BRR_54);
     check_tend_after(qts, 1, FRAME_8N1_BRR35_NS);
