@@ -647,6 +647,44 @@ static void test_tx_7bit(void)
     stop_direct(qts, kernel);
 }
 
+/*
+ * While ORER is set a byte from the serial line is consumed and lost,
+ * as the manual's "newly received data is lost" (22.2.13 p.1296); the
+ * host is not held off until the clear. After the clear the line works
+ * again.
+ */
+static void test_rx_chardev_while_orer(void)
+{
+    g_autofree char *kernel = NULL;
+    g_autofree char *args = NULL;
+    int fd = g_file_open_tmp("rzv2l-scifa-XXXXXX", &kernel, NULL);
+    uint64_t b = SCIF_BASE(0);
+    QTestState *qts;
+    int sock;
+
+    g_assert(fd >= 0);
+    close(fd);
+    args = g_strdup_printf("-machine rzv2l-smarc -kernel %s", kernel);
+    qts = qtest_init_with_serial(args, &sock);
+    qtest_writew(qts, b + FCR, FCR_LOOP);
+    loop_bytes(qts, "0123456789abcdefg", FRAME_8N1_NS);
+    g_assert_cmphex(qtest_readw(qts, b + LSR), ==, LSR_ORER);
+    g_assert_true(send(sock, "Z", 1, 0) == 1);
+    g_usleep(200000);               /* QEMU is idle: the byte is read now */
+    qtest_writew(qts, b + LSR, 0);
+    g_assert_cmphex(qtest_readb(qts, b + FRDR), ==, '0');
+    g_usleep(200000);
+    g_assert_cmphex(qtest_readw(qts, b + FDR), ==, 15);  /* Z was lost */
+    g_assert_true(send(sock, "Y", 1, 0) == 1);
+    for (int i = 0; i < 5000 && (qtest_readw(qts, b + FDR) & 0x1f) < 16; i++) {
+        g_usleep(1000);
+    }
+    g_assert_cmphex(qtest_readw(qts, b + FDR), ==, 16);
+    close(sock);
+    qtest_quit(qts);
+    unlink(kernel);
+}
+
 /* With RE = 0 the receiver ignores the line */
 static void test_rx_disabled(void)
 {
@@ -795,6 +833,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/scif/rx-stopped-by-orer",
                    test_rx_stopped_by_orer);
     qtest_add_func("/rzv2l-smarc/scif/tx-7bit", test_tx_7bit);
+    qtest_add_func("/rzv2l-smarc/scif/rx-chardev-while-orer",
+                   test_rx_chardev_while_orer);
     qtest_add_func("/rzv2l-smarc/scif/rx-disabled", test_rx_disabled);
     qtest_add_func("/rzv2l-smarc/scif/irq-txi", test_irq_txi);
     qtest_add_func("/rzv2l-smarc/scif/irq-rxi", test_irq_rxi);
