@@ -7,9 +7,10 @@
 /*
  * The clock, reset and module-stop registers of manual Table 7.5, plus
  * the PLL1 setting registers, the dividers, the selectors and the two
- * other-function registers (PLL5_4 source selection). Reset values,
- * writable bits and write-enable bits come from the register
- * descriptions in section 7.2.4.
+ * other-function registers (OTHERFUNC1 bit 0 selects the PLL5_4 source;
+ * OTHERFUNC2 bit 0 drives DDR_RST_N, which the model stores only).
+ * Reset values, writable bits and write-enable bits come from the
+ * register descriptions in section 7.2.4.
  *
  * - A field is written only when its write-enable bit (16 above the
  *   field's lowest bit) is set in the same write; the enable bits read
