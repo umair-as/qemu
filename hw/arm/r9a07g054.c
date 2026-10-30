@@ -121,6 +121,19 @@ static const struct {
     { "usb1-host",      0x11c70000, 0x10000, false },
     { "sdhi0",          0x11c00000, 0x10000, false },
     { "sdhi1",          0x11c10000, 0x10000, false },
+    { "mipi-dsi",       0x10850000, 0x20000, false },
+    { "vspd",           0x10870000, 0x10000, false },
+    { "fcpvd",          0x10880000, 0x10000, false },
+    { "du",             0x10890000, 0x10000, false },
+    { "ssi0",           0x10049c00, 0x400,   false },
+    { "ssi1",           0x1004a000, 0x400,   false },
+    { "rspi1",          0x1004b000, 0x400,   false },
+    { "canfd",          0x10050000, 0x8000,  false },
+    { "adc",            0x10059000, 0x400,   false },
+    { "usb0-func",      0x11c60000, 0x10000, false },
+    { "rpc-if",         0x10060000, 0x10000, false },
+    { "rpc-if-wbuf",    0x10070000, 0x10000, false },
+    { "rpc-if-dirmap",  0x20000000, 0x10000000, false },
 };
 
 static void r9a07g054_init(Object *obj)
