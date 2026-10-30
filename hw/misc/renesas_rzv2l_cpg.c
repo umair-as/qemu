@@ -35,8 +35,9 @@
  *   no system reset clears it. A system reset initialises
  *   CPG_WDTRST_SEL: an inference from the note to section 7.2.4.183,
  *   which has a system reset return WDTRSTSEL7 to its initial value.
- *   Only power-on clears the flag (the model's reading). The cold reset and WDTOVFOUT
- *   pin selections (bits 10:8, 6:4) are stored only.
+ *   Only power-on clears the flag (the model's reading). The cold
+ *   reset and WDTOVFOUT pin selections (bits 10:8, 6:4) are stored
+ *   only.
  * Nothing else in the SoC sees the clock, reset or module-stop state.
  * The PLL monitors, PLL4, PLL6, PLL5 output settings and the Cortex-A55
  * power handshake are not modelled, nor are offsets the manual does not
