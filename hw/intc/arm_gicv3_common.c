@@ -184,6 +184,24 @@ static const VMStateDescription vmstate_gicv3_cpu_nmi = {
     }
 };
 
+static bool gicv3_cpu_pwrr_needed(void *opaque)
+{
+    GICv3CPUState *cs = opaque;
+
+    return gicv3_is_gic600(cs->gic);
+}
+
+static const VMStateDescription vmstate_gicv3_cpu_pwrr = {
+    .name = "arm_gicv3_cpu/pwrr",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = gicv3_cpu_pwrr_needed,
+    .fields = (const VMStateField[]) {
+        VMSTATE_BOOL(gicr_pwrr_rdpd, GICv3CPUState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_gicv3_cpu = {
     .name = "arm_gicv3_cpu",
     .version_id = 1,
@@ -217,6 +235,7 @@ static const VMStateDescription vmstate_gicv3_cpu = {
         &vmstate_gicv3_cpu_sre_el1,
         &vmstate_gicv3_gicv4,
         &vmstate_gicv3_cpu_nmi,
+        &vmstate_gicv3_cpu_pwrr,
         NULL
     }
 };
@@ -508,6 +527,12 @@ static void arm_gicv3_common_reset_hold(Object *obj, ResetType type)
         cs->gicr_statusr[GICV3_S] = 0;
         cs->gicr_statusr[GICV3_NS] = 0;
         cs->gicr_waker = GICR_WAKER_ProcessorSleep | GICR_WAKER_ChildrenAsleep;
+        /*
+         * A GIC-600's Redistributors are powered down at reset (GIC-600
+         * TRM section 3.6.1); firmware that starts a kernel in
+         * non-secure has powered them up.
+         */
+        cs->gicr_pwrr_rdpd = !s->irq_reset_nonsecure;
         cs->gicr_propbaser = 0;
         cs->gicr_pendbaser = 0;
         cs->gicr_vpropbaser = 0;

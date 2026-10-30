@@ -344,6 +344,56 @@ static MemTxResult gicr_writeb(GICv3CPUState *cs, hwaddr offset,
     }
 }
 
+/*
+ * The GIC-600's GICR_PWRR. All the Redistributors form one group, and a
+ * power transition completes at once, so RDGPO always equals RDGPD. Only
+ * the power state is kept: the Redistributor works whatever its state.
+ */
+static uint32_t gicr_read_pwrr(GICv3CPUState *cs)
+{
+    GICv3State *s = cs->gic;
+    bool group_down = true;
+    uint32_t r = 0;
+    int i;
+
+    for (i = 0; i < s->num_cpu; i++) {
+        group_down &= s->cpu[i].gicr_pwrr_rdpd;
+    }
+    r = FIELD_DP32(r, GICR_PWRR, RDPD, cs->gicr_pwrr_rdpd);
+    r = FIELD_DP32(r, GICR_PWRR, RDGPD, group_down);
+    r = FIELD_DP32(r, GICR_PWRR, RDGPO, group_down);
+    r = FIELD_DP32(r, GICR_PWRR, RDGO, cs - s->cpu);
+    return r;
+}
+
+static bool gicr_pwrr_accessible(GICv3CPUState *cs, MemTxAttrs attrs)
+{
+    return attrs.secure || (cs->gic->gicd_ctlr & GICD_CTLR_DS);
+}
+
+/* Powering down needs GICR_WAKER.ProcessorSleep, for each core affected */
+static void gicr_write_pwrr(GICv3CPUState *cs, uint32_t value)
+{
+    GICv3State *s = cs->gic;
+    bool rdpd = FIELD_EX32(value, GICR_PWRR, RDPD);
+    int i;
+
+    if (!FIELD_EX32(value, GICR_PWRR, RDAG)) {
+        if (!rdpd || (cs->gicr_waker & GICR_WAKER_ProcessorSleep)) {
+            cs->gicr_pwrr_rdpd = rdpd;
+        }
+        return;
+    }
+    for (i = 0; rdpd && i < s->num_cpu; i++) {
+        if (!(s->cpu[i].gicr_waker & GICR_WAKER_ProcessorSleep)) {
+            return;
+        }
+    }
+    for (i = 0; i < s->num_cpu; i++) {
+        s->cpu[i].gicr_pwrr_rdpd = rdpd;
+    }
+}
+
 static MemTxResult gicr_readl(GICv3CPUState *cs, hwaddr offset,
                               uint64_t *data, MemTxAttrs attrs)
 {
@@ -368,6 +418,13 @@ static MemTxResult gicr_readl(GICv3CPUState *cs, hwaddr offset,
         return MEMTX_OK;
     case GICR_WAKER:
         *data = cs->gicr_waker;
+        return MEMTX_OK;
+    case GICR_PWRR:
+        if (!gicv3_is_gic600(cs->gic)) {
+            return MEMTX_ERROR;
+        }
+        /* Secure-only, unless GICD_CTLR.DS == 1: RAZ/WI */
+        *data = gicr_pwrr_accessible(cs, attrs) ? gicr_read_pwrr(cs) : 0;
         return MEMTX_OK;
     case GICR_PROPBASER:
         *data = extract64(cs->gicr_propbaser, 0, 32);
@@ -523,6 +580,14 @@ static MemTxResult gicr_writel(GICv3CPUState *cs, hwaddr offset,
             value |= GICR_WAKER_ChildrenAsleep;
         }
         cs->gicr_waker = value;
+        return MEMTX_OK;
+    case GICR_PWRR:
+        if (!gicv3_is_gic600(cs->gic)) {
+            return MEMTX_ERROR;
+        }
+        if (gicr_pwrr_accessible(cs, attrs)) {
+            gicr_write_pwrr(cs, value);
+        }
         return MEMTX_OK;
     case GICR_PROPBASER:
         cs->gicr_propbaser = deposit64(cs->gicr_propbaser, 0, 32, value);
