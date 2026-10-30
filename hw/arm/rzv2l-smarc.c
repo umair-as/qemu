@@ -22,6 +22,7 @@
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
+#include <libfdt.h>
 
 #define TYPE_RZV2L_SMARC_MACHINE MACHINE_TYPE_NAME("rzv2l-smarc")
 OBJECT_DECLARE_SIMPLE_TYPE(RZV2LSmarcState, RZV2L_SMARC_MACHINE)
@@ -31,6 +32,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(RZV2LSmarcState, RZV2L_SMARC_MACHINE)
 /* The DDR window TF-A and U-Boot hand to Linux */
 #define RZV2L_SMARC_LINUX_MEM_BASE  0x48000000
 #define RZV2L_SMARC_LINUX_MEM_SIZE  0x78000000
+
+/* MD_BOOT[2:0] = 0: boot from the SD card on the module (eSD) */
+#define RZV2L_SMARC_BOOT_MODE_ESD   0
 
 struct RZV2LSmarcState {
     MachineState parent_obj;
@@ -42,6 +46,59 @@ struct RZV2LSmarcState {
     uint8_t boot_mode;
     bool debugen;
 };
+
+/*
+ * Point a supply property of an existing node at a regulator node, as
+ * the vendor U-Boot's update_fdt() does: the regulator gets a phandle
+ * if it has none, and a missing regulator leaves the property as it was.
+ */
+static void rzv2l_smarc_set_supply(void *fdt, const char *node,
+                                   const char *prop, const char *regulator)
+{
+    int node_off, reg_off;
+    uint32_t phandle;
+
+    node_off = fdt_path_offset(fdt, node);
+    reg_off = fdt_path_offset(fdt, regulator);
+    if (node_off < 0 || reg_off < 0) {
+        return;
+    }
+    phandle = fdt_get_phandle(fdt, reg_off);
+    if (!phandle) {
+        if (fdt_generate_phandle(fdt, &phandle) < 0 ||
+            fdt_setprop_u32(fdt, reg_off, "phandle", phandle) < 0) {
+            error_report("couldn't add a phandle to %s", regulator);
+            exit(1);
+        }
+        /* Adding a property may move the node */
+        node_off = fdt_path_offset(fdt, node);
+    }
+    if (fdt_setprop_u32(fdt, node_off, prop, phandle) < 0) {
+        error_report("couldn't set %s/%s", node, prop);
+        exit(1);
+    }
+}
+
+/*
+ * The device-tree edits the board's U-Boot makes before it starts
+ * Linux, for a kernel QEMU loads itself. When the boot mode pins
+ * select eSD, the U-Boot board code points the SD0 supplies at the
+ * SD0 regulators. The Linux device trees for the board have no
+ * "regulator-vcc-sdhi0" node, so vmmc-supply keeps its value; only
+ * vqmmc-supply changes. U-Boot's other edits are not made here.
+ */
+static void rzv2l_smarc_modify_dtb(const struct arm_boot_info *info,
+                                   void *fdt)
+{
+    RZV2LSmarcState *s = container_of(info, RZV2LSmarcState, boot_info);
+
+    if (s->boot_mode == RZV2L_SMARC_BOOT_MODE_ESD) {
+        rzv2l_smarc_set_supply(fdt, "/soc/mmc@11c00000", "vmmc-supply",
+                               "/regulator-vcc-sdhi0");
+        rzv2l_smarc_set_supply(fdt, "/soc/mmc@11c00000", "vqmmc-supply",
+                               "/regulator-vccq-sdhi0");
+    }
+}
 
 static void rzv2l_smarc_init(MachineState *machine)
 {
@@ -58,6 +115,7 @@ static void rzv2l_smarc_init(MachineState *machine)
         .board_id = -1,
         .ram_size = RZV2L_SMARC_LINUX_MEM_SIZE,
         .psci_conduit = QEMU_PSCI_CONDUIT_SMC,
+        .modify_dtb = rzv2l_smarc_modify_dtb,
     };
 
     object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_R9A07G054);
