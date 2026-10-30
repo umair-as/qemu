@@ -200,6 +200,8 @@ static void cpu_max_get_l0gptsz(Object *obj, Visitor *v, const char *name,
 static const Property arm_cpu_lpa2_property =
     DEFINE_PROP_BOOL("lpa2", ARMCPU, prop_lpa2, true);
 
+static void define_cortex_a55_cp_reginfo(ARMCPU *cpu);
+
 static void aarch64_a55_initfn(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
@@ -271,6 +273,8 @@ static void aarch64_a55_initfn(Object *obj)
 
     /* From D5.4 AArch64 PMU register summary */
     cpu->isar.reset_pmcr_el0 = 0x410b3000;
+
+    define_cortex_a55_cp_reginfo(cpu);
 }
 
 static void aarch64_a72_initfn(Object *obj)
@@ -622,6 +626,24 @@ static const ARMCPRegInfo neoverse_n1_cp_reginfo[] = {
       .access = PL1_RW, .type = ARM_CP_CONST, .resetvalue = 0,
       .accessfn = access_actlr_w },
 };
+
+/*
+ * IMPLEMENTATION DEFINED registers of the Cortex-A55 that firmware
+ * uses. Firmware sets CPUPWRCTLR_EL1.CORE_PWRDN_EN before the WFI that
+ * ends a core power-down; with no power controller model behind the
+ * core, the register is RAZ/WI, as on the Neoverse N1.
+ */
+static const ARMCPRegInfo cortex_a55_cp_reginfo[] = {
+    { .name = "CPUPWRCTLR_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .crn = 15, .crm = 2, .opc2 = 7,
+      .access = PL1_RW, .type = ARM_CP_CONST, .resetvalue = 0,
+      .accessfn = access_actlr_w },
+};
+
+static void define_cortex_a55_cp_reginfo(ARMCPU *cpu)
+{
+    define_arm_cp_regs(cpu, cortex_a55_cp_reginfo);
+}
 
 static void define_neoverse_n1_cp_reginfo(ARMCPU *cpu)
 {
