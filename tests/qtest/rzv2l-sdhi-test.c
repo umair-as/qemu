@@ -429,6 +429,20 @@ static void test_dma(void)
     g_assert_cmphex(rd(qts, b, DM_CM_INFO1) & (DTRANEND1 | DTRANEND0), ==,
                     DTRANEND0);
     g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO2, ==, INFO2);
+    wr(qts, b, DM_CM_INFO1, ~DTRANEND0);
+
+    /* Figure 40.23 order: DMA enabled after the response, SD_BUF empty */
+    qtest_memwrite(qts, DMA_BUF + 0x1000, mem, 2 * 512);
+    wr(qts, b, CC_EXT_MODE, 0x1010);
+    wr(qts, b, SD_SECCNT, 2);
+    cmd(qts, b, CMD_R1 | CMD_DATA | CMD_MULTI | 25, 0x8000);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (CBSY | BWE), ==, CBSY | BWE);
+    wr(qts, b, CC_EXT_MODE, 0x1012);
+    wr(qts, b, DM_DTRAN_ADDR, DMA_BUF + 0x1000);
+    wr(qts, b, DM_CM_DTRAN_CTRL, 1);
+    g_assert_cmphex(rd(qts, b, DM_CM_INFO1) & DTRANEND0, ==, DTRANEND0);
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO2, ==, INFO2);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (CBSY | BWE), ==, 0);
     qtest_quit(qts);
 
     {
@@ -437,8 +451,11 @@ static void test_dma(void)
         g_assert(f);
         g_assert(fseek(f, 0x4000, SEEK_SET) == 0);
         g_assert(fread(back, 1, 3 * 512, f) == 3 * 512);
-        fclose(f);
         g_assert(memcmp(mem, back, 3 * 512) == 0);
+        g_assert(fseek(f, 0x8000, SEEK_SET) == 0);
+        g_assert(fread(back, 1, 2 * 512, f) == 2 * 512);
+        g_assert(memcmp(mem, back, 2 * 512) == 0);
+        fclose(f);
     }
     unlink(img);
 }
