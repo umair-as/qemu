@@ -75,3 +75,12 @@ pl181_data_engine_idle(void) "data engine idle"
 # aspeed_sdhci.c
 aspeed_sdhci_read(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size %u: 0x%" PRIx64
 aspeed_sdhci_write(uint64_t addr, uint32_t size, uint64_t data) "@0x%" PRIx64 " size %u: 0x%" PRIx64
+
+# renesas_sdhi.c
+renesas_sdhi_read(uint64_t offset, uint64_t data, unsigned size) "offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
+renesas_sdhi_write(uint64_t offset, uint64_t data, unsigned size) "offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
+renesas_sdhi_command(uint8_t index, uint32_t arg, int rtype, size_t rlen) "CMD%u arg 0x%08x response type %d length %zu"
+renesas_sdhi_dma(bool to_memory, uint64_t addr, uint32_t blocks, uint32_t size) "to memory %u addr 0x%" PRIx64 " blocks %u size %u"
+renesas_sdhi_end(bool access_end, uint32_t info2) "access end %u SD_INFO2 0x%x"
+renesas_sdhi_irq(bool main, bool sdio) "OXMNIRQ %u OXASIOIRQ %u"
+renesas_sdhi_ixrst(int level) "reset %d"
