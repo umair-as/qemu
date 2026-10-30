@@ -141,6 +141,7 @@ struct GICv3CPUState {
     uint64_t gicr_typer;
     uint32_t gicr_statusr[2];
     uint32_t gicr_waker;
+    bool gicr_pwrr_rdpd;             /* GIC-600 GICR_PWRR.RDPD */
     uint64_t gicr_propbaser;
     uint64_t gicr_pendbaser;
     /* SGI_base page registers */

@@ -91,6 +91,8 @@
 #define GICR_TYPER            0x0008
 #define GICR_STATUSR          0x0010
 #define GICR_WAKER            0x0014
+/* GIC-600 only: IMPLEMENTATION DEFINED Power Register */
+#define GICR_PWRR             0x0024
 #define GICR_SETLPIR          0x0040
 #define GICR_CLRLPIR          0x0048
 #define GICR_PROPBASER        0x0070
@@ -761,6 +763,28 @@ static inline uint32_t gicv3_iidr(GICv3State *s)
      * property; the default is GICV3_IIDR_DEFAULT.
      */
     return s->iidr;
+}
+
+/*
+ * GICR_PWRR of the Arm GIC-600 (GIC-600 TRM 100336_0106_00, section
+ * 4.4.5): RDPD powers a Redistributor down or up, RDAG applies RDPD to
+ * every Redistributor of the group, RDGPD and RDGPO report the group's
+ * intended and actual power state.
+ */
+FIELD(GICR_PWRR, RDPD, 0, 1)
+FIELD(GICR_PWRR, RDAG, 1, 1)
+FIELD(GICR_PWRR, RDGPD, 2, 1)
+FIELD(GICR_PWRR, RDGPO, 3, 1)
+FIELD(GICR_PWRR, RDGO, 8, 8)
+FIELD(GICR_PWRR, RDG, 16, 8)
+
+/* GICD_IIDR ProductID and Implementer of the Arm GIC-600 */
+#define GICV3_IIDR_MODEL_MASK   0xff000fff
+#define GICV3_IIDR_MODEL_GIC600 0x0200043b
+
+static inline bool gicv3_is_gic600(GICv3State *s)
+{
+    return (gicv3_iidr(s) & GICV3_IIDR_MODEL_MASK) == GICV3_IIDR_MODEL_GIC600;
 }
 
 /* CoreSight PIDR0 values for ARM GICv3 implementations */
