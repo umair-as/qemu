@@ -164,7 +164,10 @@ static void test_reset_request(void)
     qtest_clock_step(qts, 2000);
     g_assert_cmphex(wdt_rd(qts, 0, WDTCNT), ==, 0);
     g_assert_cmphex(wdt_rd(qts, 0, WDTSET), ==, WDTSET_RESET);
-    /* The flag survives the reset it reports; WDTRST_SEL does not */
+    /*
+     * The flag is read after the reset it reports (section 7.2.4.182);
+     * a system reset initialises WDTRST_SEL (note to section 7.2.4.183)
+     */
     g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0x1);
     g_assert_cmphex(cpg_rd(qts, CPG_WDTRST_SEL), ==, WDTRST_SEL_RESET);
 
@@ -173,6 +176,41 @@ static void test_reset_request(void)
     g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0x1);
     cpg_wr(qts, CPG_WDTOVF_RST, 0x10001);
     g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0);
+    qtest_quit(qts);
+}
+
+static void test_masked_request(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    /* WDTRSTB is a level: unmasking a held request resets the system */
+    wdt0_start_shortest(qts);
+    qtest_clock_step(qts, 2 * CYCLE_NS + 1000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTCNT), ==, 1);
+    cpg_wr(qts, CPG_WDTRST_SEL, WDTRST_SEL_RESET | 0x1);
+    qtest_clock_step(qts, 1000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTCNT), ==, 0);
+    g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0x1);
+    qtest_quit(qts);
+}
+
+static void test_start_above_period(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    /*
+     * Section 21.3.3: a start value above the cycle counts to the 32-bit
+     * limit, returns to 0 and then runs at the set cycle. 0x1000 clocks
+     * to the wrap, then one cycle to the first interrupt.
+     */
+    wdt_wr(qts, 0, WDTSET, 0);
+    wdt_wr(qts, 0, WDTTIM, 0xfffff000);
+    wdt_wr(qts, 0, WDTCNT, 1);
+    qtest_clock_step(qts, (0x1000ull + CYCLE_CLOCKS) * 1000000000ull /
+                          24000000 - 1000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 0);
+    qtest_clock_step(qts, 2000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 1);
     qtest_quit(qts);
 }
 
@@ -247,6 +285,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-wdt/count", test_count);
     qtest_add_func("/rzv2l-wdt/first-overflow", test_first_overflow);
     qtest_add_func("/rzv2l-wdt/reset-request", test_reset_request);
+    qtest_add_func("/rzv2l-wdt/masked-request", test_masked_request);
+    qtest_add_func("/rzv2l-wdt/start-above-period", test_start_above_period);
     qtest_add_func("/rzv2l-wdt/refresh", test_refresh);
     qtest_add_func("/rzv2l-wdt/parity-force", test_parity_force);
     qtest_add_func("/rzv2l-wdt/presetn", test_presetn);
