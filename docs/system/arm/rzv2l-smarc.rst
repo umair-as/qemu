@@ -12,14 +12,22 @@ Supported devices
  * 2 Cortex-A55 cores
  * Generic Interrupt Controller (GICv3, identifying as an Arm GIC-600 r1p6)
  * System Controller (SYSC): the device ID, product and boot mode
-   registers only
+   registers, the Cortex-A55 reset vectors and the Cortex-A55 side of the
+   sleep handshake with the Cortex-M33
+ * System counter (SYC, a CoreSight timestamp generator): the control
+   registers firmware programs
+ * TrustZone Address Space Controllers TZC0-3 (TZC-400): programming is
+   stored, not enforced
+ * On-chip SRAM for the Cortex-M33 and the Cortex-A55
  * Serial ports SCIF0-4 (SCIFA), asynchronous mode: transmit, receive,
    loopback and the five interrupt lines.
    SCIF0 is the board console and takes the first ``-serial`` backend;
    SCIF1-4 take the next ones.
  * Clock Pulse Generator (CPG): the clock, reset and module-stop
    registers, with their monitors; the clocks and resets have no effect
-   on the other devices, except the watchdog reset lines
+   on the other devices, except the watchdog reset lines and the
+   Cortex-A55 cores, which the CPG starts and stops through their reset
+   lines and P-Channel power handshake
  * OS timers OSTM0-2
  * Pin function controller: the pin registers, without electrical
    effect
@@ -94,3 +102,23 @@ DDR are left to the secure firmware.
   $ qemu-system-aarch64 -M rzv2l-smarc \
       -kernel Image \
       -dtb r9a07g054l2-smarc.dtb
+
+With ``-bios``, the image is the board's Trusted Firmware-A BL31, which
+runs at EL3 and is the PSCI firmware: it starts and stops the second
+core through the SoC's reset and power registers, and resets the board
+through WDT0. The machine does what the board's BL2 does before BL31:
+it loads BL31 at 0x44000000, the ``-kernel`` image (an arm64 Linux
+``Image``) at 0x48200000 and its device tree at 0x58000000, and leaves
+BL2's parameter block for BL31 at 0x2f000 in SRAM. The kernel is BL31's
+next image, entered at non-secure EL1. The boot ROM, BL2 and the DDR
+initialisation are not run, there is no OP-TEE, and ``-initrd`` is not
+supported. The firmware does not implement PSCI ``SYSTEM_OFF``.
+
+.. code-block:: bash
+
+  $ qemu-system-aarch64 -M rzv2l-smarc \
+      -bios bl31.bin \
+      -kernel Image \
+      -dtb r9a07g054l2-smarc.dtb \
+      -append "rw rootwait root=/dev/mmcblk0p2" \
+      -drive if=sd,index=0,format=raw,file=sd.img

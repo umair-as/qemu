@@ -9,6 +9,12 @@
  * entered at non-secure EL1, with QEMU's PSCI over SMC standing in for
  * TF-A, and is given the memory window that TF-A and U-Boot give Linux
  * on the board: the first 128 MiB of DDR belong to the secure firmware.
+ *
+ * With -bios, the image is the board's TF-A BL31 and runs at EL3 as the
+ * PSCI firmware. The machine does what BL2 does before it: it loads BL31,
+ * the kernel (as BL33) and its device tree, writes BL2's parameter block
+ * for BL31 into SRAM, and starts CPU0 in a stub that enters BL31 as BL2
+ * does. The boot ROM, BL2 and DDR initialisation are not run.
  */
 
 #include "qemu/osdep.h"
@@ -23,6 +29,9 @@
 #include "system/block-backend.h"
 #include "system/qtest.h"
 #include "qemu/error-report.h"
+#include "hw/core/loader.h"
+#include "qemu/datadir.h"
+#include "system/reset.h"
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include <libfdt.h>
@@ -35,6 +44,20 @@ OBJECT_DECLARE_SIMPLE_TYPE(RZV2LSmarcState, RZV2L_SMARC_MACHINE)
 /* The DDR window TF-A and U-Boot hand to Linux */
 #define RZV2L_SMARC_LINUX_MEM_BASE  0x48000000
 #define RZV2L_SMARC_LINUX_MEM_SIZE  0x78000000
+
+/*
+ * Firmware mode: where TF-A's BL2 for the board puts each image, and
+ * where it leaves BL31's parameters (TF-A plat/renesas/rz/common/include:
+ * BL31_BASE, BL31_LIMIT, PARAMS_BASE, BL2_BASE). The kernel and its DTB
+ * go where U-Boot puts them on the board.
+ */
+#define RZV2L_SMARC_BL2_BASE        0x00012000
+#define RZV2L_SMARC_BL31_PARAMS     0x0002f000
+#define RZV2L_SMARC_BL31_BASE       0x44000000
+#define RZV2L_SMARC_BL31_SIZE       0x00040000
+#define RZV2L_SMARC_BL33_KERNEL     0x48200000
+#define RZV2L_SMARC_BL33_DTB        0x58000000
+#define RZV2L_SMARC_BL33_DTB_SIZE   (2 * MiB)
 
 /* MD_BOOT[2:0] = 0: boot from the SD card on the module (eSD) */
 #define RZV2L_SMARC_BOOT_MODE_ESD   0
@@ -164,6 +187,136 @@ static void rzv2l_smarc_attach_sd(RZV2LSmarcState *s)
     }
 }
 
+/*
+ * The start of BL2's work that BL31 relies on: BL2 enters BL31 at EL3
+ * with x0 pointing at its parameter block and x1-x3 zero (TF-A
+ * plat/renesas/rz/common/bl2_plat_mem_params_desc.c, the BL31 entry
+ * point). CPU0 starts here instead of in the boot ROM.
+ */
+static const uint32_t rzv2l_smarc_bl2_stub[] = {
+    0x580000c0,     /* ldr  x0, params */
+    0xd2800001,     /* mov  x1, #0 */
+    0xd2800002,     /* mov  x2, #0 */
+    0xd2800003,     /* mov  x3, #0 */
+    0x58000084,     /* ldr  x4, bl31 */
+    0xd61f0080,     /* br   x4 */
+    RZV2L_SMARC_BL31_PARAMS, 0,         /* params: .quad */
+    RZV2L_SMARC_BL31_BASE, 0,           /* bl31: .quad */
+};
+
+/*
+ * BL2's parameter block for BL31, bl2_to_bl31_params_mem_t (TF-A
+ * plat/renesas/rz/common/include/rz_private.h): the boot kind, then the
+ * BL32 and BL33 entry points. BL2 zeroes it, so the boot kind is a cold
+ * boot, and fills in the entry point of each image it loaded
+ * (plat/renesas/rz/common/bl2_plat_setup.c,
+ * bl2_plat_handle_post_image_load()). Only BL33 is given, so BL31 starts
+ * no BL32. BL2 gives
+ * U-Boot the address of its own device tree in x1; for a Linux BL33 the
+ * device tree goes in x0, as the arm64 boot protocol requires.
+ */
+#define BL31_PARAMS_SIZE        184
+#define BL31_PARAMS_BL33_EP     96
+#define EP_PC                   8
+#define EP_SPSR                 16
+#define EP_ARGS                 24
+#define PARAM_EP                1
+#define VERSION_2               2
+#define EP_INFO_SIZE            88
+#define EP_NON_SECURE_EXEC      0x9         /* NON_SECURE | EXECUTABLE */
+#define SPSR_EL1H_DAIF          0x3c5       /* EL1h, DAIF masked */
+
+static void rzv2l_smarc_write_bl31_params(hwaddr kernel, hwaddr dtb)
+{
+    uint8_t params[BL31_PARAMS_SIZE] = { 0 };
+    uint8_t *ep = params + BL31_PARAMS_BL33_EP;
+
+    ep[0] = PARAM_EP;
+    ep[1] = VERSION_2;
+    stw_le_p(ep + 2, EP_INFO_SIZE);
+    stl_le_p(ep + 4, EP_NON_SECURE_EXEC);
+    stq_le_p(ep + EP_PC, kernel);
+    stl_le_p(ep + EP_SPSR, SPSR_EL1H_DAIF);
+    stq_le_p(ep + EP_ARGS, dtb);
+    rom_add_blob_fixed("bl31-params", params, sizeof(params),
+                       RZV2L_SMARC_BL31_PARAMS);
+}
+
+/* CPU objects are not reset with the machine; CPU0 restarts in the stub */
+static void rzv2l_smarc_firmware_cpu_reset(void *opaque)
+{
+    CPUState *cs = opaque;
+
+    cpu_reset(cs);
+    if (cs->cpu_index == 0) {
+        cpu_set_pc(cs, RZV2L_SMARC_BL2_BASE);
+    }
+}
+
+/* Load a file at a fixed address, or exit with an error */
+static void rzv2l_smarc_load(const char *what, const char *filename,
+                             hwaddr addr, hwaddr max)
+{
+    if (load_image_targphys(filename, addr, max, NULL) < 0) {
+        error_report("couldn't load %s '%s'", what, filename);
+        exit(1);
+    }
+}
+
+static void rzv2l_smarc_firmware_boot(RZV2LSmarcState *s,
+                                      MachineState *machine)
+{
+    g_autofree char *bl31 = NULL;
+    uint8_t header[64];
+    CPUState *cs;
+    int fd;
+
+    if (!machine->kernel_filename || !machine->dtb) {
+        error_report("-bios (TF-A BL31) needs -kernel and -dtb: the kernel "
+                     "is BL31's next image");
+        exit(1);
+    }
+    if (machine->initrd_filename) {
+        error_report("-initrd is not supported with -bios");
+        exit(1);
+    }
+    bl31 = qemu_find_file(QEMU_FILE_TYPE_BIOS, machine->firmware);
+    if (!bl31) {
+        error_report("couldn't find BL31 image '%s'", machine->firmware);
+        exit(1);
+    }
+
+    /* An arm64 Image with text_offset 0: placed at a 2 MiB boundary */
+    fd = open(machine->kernel_filename, O_RDONLY | O_BINARY);
+    if (fd < 0 || read(fd, header, sizeof(header)) != sizeof(header) ||
+        ldl_le_p(header + 56) != 0x644d5241 || ldq_le_p(header + 8) != 0) {
+        error_report("-kernel '%s' is not an arm64 Image with text_offset 0",
+                     machine->kernel_filename);
+        exit(1);
+    }
+    close(fd);
+
+    rzv2l_smarc_load("BL31", bl31, RZV2L_SMARC_BL31_BASE,
+                     RZV2L_SMARC_BL31_SIZE);
+    rzv2l_smarc_load("kernel", machine->kernel_filename,
+                     RZV2L_SMARC_BL33_KERNEL,
+                     RZV2L_SMARC_BL33_DTB - RZV2L_SMARC_BL33_KERNEL);
+    s->boot_info.dtb_filename = machine->dtb;
+    if (arm_load_dtb(RZV2L_SMARC_BL33_DTB, &s->boot_info,
+                     RZV2L_SMARC_BL33_DTB + RZV2L_SMARC_BL33_DTB_SIZE,
+                     &address_space_memory, machine, &s->soc.cpu[0]) < 0) {
+        exit(1);
+    }
+    rzv2l_smarc_write_bl31_params(RZV2L_SMARC_BL33_KERNEL,
+                                  RZV2L_SMARC_BL33_DTB);
+    rom_add_blob_fixed("bl2-stub", rzv2l_smarc_bl2_stub,
+                       sizeof(rzv2l_smarc_bl2_stub), RZV2L_SMARC_BL2_BASE);
+
+    CPU_FOREACH(cs) {
+        qemu_register_reset(rzv2l_smarc_firmware_cpu_reset, cs);
+    }
+}
+
 static void rzv2l_smarc_init(MachineState *machine)
 {
     RZV2LSmarcState *s = RZV2L_SMARC_MACHINE(machine);
@@ -188,9 +341,11 @@ static void rzv2l_smarc_init(MachineState *machine)
     object_property_set_bool(OBJECT(&s->soc), "debugen", s->debugen,
                              &error_fatal);
     /*
-     * Without firmware, SCIF0 starts as the firmware would have left
-     * the console, and the CPG and PFC with the clocks, resets and pin
-     * functions the firmware would have set up.
+     * When QEMU loads the kernel, BL2 and U-Boot do not run, also with
+     * BL31 from -bios: SCIF0 starts as the firmware would have left the
+     * console, and the CPG and PFC with the clocks, resets and pin
+     * functions the firmware would have set up. Without BL31 the system
+     * counter also starts as BL31 leaves it.
      */
     object_property_set_bool(OBJECT(&s->soc), "scif0-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
@@ -198,13 +353,21 @@ static void rzv2l_smarc_init(MachineState *machine)
                              machine->kernel_filename != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "pfc-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
+    object_property_set_bool(OBJECT(&s->soc), "syc-direct-boot",
+                             machine->kernel_filename && !machine->firmware,
+                             &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
     rzv2l_smarc_attach_sd(s);
 
     memory_region_add_subregion(get_system_memory(), R9A07G054_DDR_BASE,
                                 machine->ram);
 
-    if (!qtest_enabled()) {
+    if (qtest_enabled()) {
+        return;
+    }
+    if (machine->firmware) {
+        rzv2l_smarc_firmware_boot(s, machine);
+    } else {
         arm_load_kernel(&s->soc.cpu[0], machine, &s->boot_info);
     }
 }

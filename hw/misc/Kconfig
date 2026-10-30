@@ -251,6 +251,9 @@ config DJMEMC
 config IOSB
     bool
 
+config ARM_TZC400
+    bool
+
 config RENESAS_RZG2L_SYSC
     bool
 

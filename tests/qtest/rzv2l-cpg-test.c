@@ -328,6 +328,76 @@ static void test_monitors(void)
 }
 
 /* A system reset brings back the reset values */
+/*
+ * The Cortex-A55 core P-Channels (manual sections 7.2.4.186 to
+ * 7.2.4.189): CPG_COREn_PCHCTL resets to PSTATE ON (0x08) without a
+ * request; software raises PREQ with a power mode in PSTATE and waits
+ * for PACCEPT, then lowers PREQ and waits for PACCEPT to fall (sections
+ * 2.2.1 and 2.2.2). PDENY stays 0.
+ */
+static void test_pchannel(void)
+{
+    static const uint32_t pchctl[] = { 0xb3c, 0xb44 };
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+    int n;
+
+    for (n = 0; n < ARRAY_SIZE(pchctl); n++) {
+        uint64_t ctl = CPG_BASE + pchctl[n], mon = ctl - 4;
+
+        g_assert_cmphex(qtest_readl(qts, ctl), ==, 0x00080000);
+        qtest_writel(qts, ctl, 0x00080001);
+        g_assert_cmphex(qtest_readl(qts, ctl), ==, 0x00080001);
+        g_assert_cmphex(qtest_readl(qts, mon), ==, 0x1);
+        qtest_writel(qts, ctl, 0x00080000);
+        g_assert_cmphex(qtest_readl(qts, mon), ==, 0x0);
+        /* Reserved bits read 0 */
+        qtest_writel(qts, ctl, 0xffffffff);
+        g_assert_cmphex(qtest_readl(qts, ctl), ==, 0x003f0001);
+    }
+    qtest_system_reset(qts);
+    g_assert_cmphex(qtest_readl(qts, CPG_BASE + pchctl[1]), ==, 0x00080000);
+    qtest_quit(qts);
+}
+
+/*
+ * Starting and stopping a core (manual sections 2.2.1 and 2.2.2): core
+ * n runs while its reset terminals CA55_RST1_n and CA55_RST3_n (CPG_RST_CA55
+ * bits n and n + 2) are released and its P-Channel last accepted ON. A
+ * power-on reset starts core 0 only. The CPG's "ca55-run" lines show it.
+ */
+static void test_ca55_run(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+    uint64_t pchctl1 = CPG_BASE + 0xb44;
+
+    qtest_irq_intercept_out_named(qts, "/machine/soc/cpg", "ca55-run");
+    g_assert_false(qtest_get_irq(qts, 1));
+
+    /* ON accepted, resets released (their reset value): core 1 starts */
+    qtest_writel(qts, pchctl1, 0x00080001);
+    g_assert_true(qtest_get_irq(qts, 1));
+    qtest_writel(qts, pchctl1, 0x00080000);
+    g_assert_true(qtest_get_irq(qts, 1));
+
+    /* CA55_RST1_1 applied: core 1 stops; released: it runs again */
+    qtest_writel(qts, CPG_BASE + RST_CA55, 0x00020000);
+    g_assert_false(qtest_get_irq(qts, 1));
+    qtest_writel(qts, CPG_BASE + RST_CA55, 0x000a000a);
+    g_assert_true(qtest_get_irq(qts, 1));
+    /* CA55_RST3_1 applied alone stops it too */
+    qtest_writel(qts, CPG_BASE + RST_CA55, 0x00080000);
+    g_assert_false(qtest_get_irq(qts, 1));
+    qtest_writel(qts, CPG_BASE + RST_CA55, 0x00080008);
+    g_assert_true(qtest_get_irq(qts, 1));
+
+    /* OFF accepted: core 1 stops, with its resets released */
+    qtest_writel(qts, pchctl1, 0x00000001);
+    g_assert_false(qtest_get_irq(qts, 1));
+    qtest_writel(qts, pchctl1, 0x00000000);
+    g_assert_false(qtest_get_irq(qts, 1));
+    qtest_quit(qts);
+}
+
 static void test_system_reset(void)
 {
     QTestState *qts = qtest_init("-machine rzv2l-smarc");
@@ -349,6 +419,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/cpg/write-enable", test_write_enable);
     qtest_add_func("/rzv2l-smarc/cpg/monitors", test_monitors);
     qtest_add_func("/rzv2l-smarc/cpg/system-reset", test_system_reset);
+    qtest_add_func("/rzv2l-smarc/cpg/pchannel", test_pchannel);
+    qtest_add_func("/rzv2l-smarc/cpg/ca55-run", test_ca55_run);
 
     return g_test_run();
 }
