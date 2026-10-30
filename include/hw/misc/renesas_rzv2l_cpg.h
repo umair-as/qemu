@@ -16,6 +16,8 @@
  *  + sysbus MMIO region 0: the CPG register bank
  *  + named GPIO outputs "wdt-presetn" 0-2: high while CPG_RST_WDT holds
  *    watchdog channel n in reset
+ *  + named GPIO outputs "sdhi-rst" 0-1: high while CPG_RST_SDHI holds
+ *    SDHI channel n in reset (its IXRST line is low)
  *  + named GPIO inputs "wdtrstb" 0-2: the reset request of watchdog
  *    channel n, active high
  */
@@ -35,6 +37,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZV2LCPGState, RENESAS_RZV2L_CPG)
 #define RENESAS_RZV2L_CPG_NUM_REGS 191
 
 #define RENESAS_RZV2L_CPG_NUM_WDT 3
+#define RENESAS_RZV2L_CPG_NUM_SDHI 2
 
 struct RenesasRZV2LCPGState {
     /*< private >*/
@@ -49,6 +52,7 @@ struct RenesasRZV2LCPGState {
     uint32_t wdtovf;
     bool wdtrstb[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq wdt_presetn[RENESAS_RZV2L_CPG_NUM_WDT];
+    qemu_irq sdhi_rst[RENESAS_RZV2L_CPG_NUM_SDHI];
 
     /* Properties */
     bool direct_boot;

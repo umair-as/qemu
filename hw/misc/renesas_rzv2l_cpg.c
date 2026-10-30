@@ -25,6 +25,9 @@
  * - CPG_CLKSTATUS reads 0: every divider and selector switch is done
  *   when the write completes.
  *
+ * - CPG_RST_SDHI drives the reset (IXRST) of each SD/MMC host interface
+ *   channel (named GPIO output "sdhi-rst", high while the reset is
+ *   applied).
  * - The watchdog: CPG_RST_WDT drives the PRESETN line of each WDT
  *   channel (named GPIO output "wdt-presetn", high while the reset is
  *   applied). A reset request from a channel (named GPIO input
@@ -334,6 +337,7 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
 }
 
 #define CPG_RST_WDT         0x848
+#define CPG_RST_SDHI        0x854
 #define CPG_WDTRST_SEL      0xb14
 #define CPG_WDTOVF_MASK     0x7
 
@@ -360,6 +364,17 @@ static void rzv2l_cpg_update_wdt(RenesasRZV2LCPGState *s)
 
     for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
         qemu_set_irq(s->wdt_presetn[n], !(rst & BIT(n)));
+    }
+}
+
+/* IXRST of each SD/MMC host interface channel: held while its bit is 0 */
+static void rzv2l_cpg_update_sdhi(RenesasRZV2LCPGState *s)
+{
+    uint32_t rst = s->regs[cpg_index[CPG_RST_SDHI / 4]];
+    int n;
+
+    for (n = 0; n < RENESAS_RZV2L_CPG_NUM_SDHI; n++) {
+        qemu_set_irq(s->sdhi_rst[n], !(rst & BIT(n)));
     }
 }
 
@@ -470,6 +485,8 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
     s->regs[idx] = (s->regs[idx] & ~mask) | (data & mask);
     if (offset == CPG_RST_WDT) {
         rzv2l_cpg_update_wdt(s);
+    } else if (offset == CPG_RST_SDHI) {
+        rzv2l_cpg_update_sdhi(s);
     } else if (offset == CPG_WDTRST_SEL) {
         for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
             if ((s->regs[idx] & ~old & BIT(n)) && s->wdtrstb[n]) {
@@ -512,6 +529,7 @@ static void rzv2l_cpg_reset_hold(Object *obj, ResetType type)
 static void rzv2l_cpg_reset_exit(Object *obj, ResetType type)
 {
     rzv2l_cpg_update_wdt(RENESAS_RZV2L_CPG(obj));
+    rzv2l_cpg_update_sdhi(RENESAS_RZV2L_CPG(obj));
 }
 
 /* The reset request of watchdog channel @n (section 7.2.4.183) */
@@ -537,6 +555,8 @@ static void rzv2l_cpg_init(Object *obj)
     sysbus_init_mmio(sbd, &s->iomem);
     qdev_init_gpio_out_named(DEVICE(obj), s->wdt_presetn, "wdt-presetn",
                              RENESAS_RZV2L_CPG_NUM_WDT);
+    qdev_init_gpio_out_named(DEVICE(obj), s->sdhi_rst, "sdhi-rst",
+                             RENESAS_RZV2L_CPG_NUM_SDHI);
     qdev_init_gpio_in_named(DEVICE(obj), rzv2l_cpg_wdtrstb, "wdtrstb",
                             RENESAS_RZV2L_CPG_NUM_WDT);
 }
