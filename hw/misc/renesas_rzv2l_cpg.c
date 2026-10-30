@@ -25,11 +25,17 @@
  * - CPG_CLKSTATUS reads 0: every divider and selector switch is done
  *   when the write completes.
  *
+ * - The watchdog: CPG_RST_WDT drives the PRESETN line of each WDT
+ *   channel (named GPIO output "wdt-presetn", high while the reset is
+ *   applied). A rising reset request from a channel (named GPIO input
+ *   "wdtrstb") resets the system when its CPG_WDTRST_SEL system-reset
+ *   bit (2:0) is set: CPG_WDTOVF_RST then records the channel, and the
+ *   flag survives the reset it caused (section 7.2.4.182). The cold
+ *   reset and WDTOVFOUT pin selections (bits 10:8, 6:4) are stored only.
  * Nothing else in the SoC sees the clock, reset or module-stop state.
- * The PLL monitors, PLL4, PLL6, PLL5 output settings, the Cortex-A55
- * power handshake and the watchdog reset selection are not modelled,
- * nor are offsets the manual does not list. Accesses to them fail with
- * a decode error.
+ * The PLL monitors, PLL4, PLL6, PLL5 output settings and the Cortex-A55
+ * power handshake are not modelled, nor are offsets the manual does not
+ * list. Accesses to them fail with a decode error.
  */
 
 #include "qemu/osdep.h"
@@ -39,6 +45,8 @@
 #include "hw/core/sysbus.h"
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
+#include "system/watchdog.h"
+#include "hw/core/irq.h"
 #include "hw/misc/renesas_rzv2l_cpg.h"
 
 #define CPG_REG_SPACE   0x1000
@@ -50,6 +58,7 @@ typedef enum {
     CPG_ZERO,       /* read-only, reads 0 */
     CPG_CLKMON,     /* computed from the CPG_CLKON_x 0x180 below */
     CPG_RSTMON,     /* computed from the CPG_RST_x 0x180 below */
+    CPG_WDTOVF,     /* CPG_WDTOVF_RST: kept across system resets */
 } CPGRegKind;
 
 typedef struct {
@@ -250,6 +259,8 @@ static const CPGReg cpg_regs[] = {
     CPG_MON(0xa2c, RSTMON_TSU, 0),
     CPG_MON(0xa5c, RSTMON_AXI_TZCDDR, 0),
     CPG_MON(0xa68, RSTMON_DRP, 0),
+    { .offset = 0xb10, .kind = CPG_WDTOVF, .name = "WDTOVF_RST" },
+    CPG_RW(0xb14, WDTRST_SEL, 0x00000088, 0x00000777),
     CPG_WE(0xb60, BUS_ACPU_MSTOP, 0x00000000, 0x0001, 0x0001),
     CPG_WE(0xb64, BUS_MCPU1_MSTOP, 0x00000000, 0xfff7, 0xffff),
     CPG_WE(0xb68, BUS_MCPU2_MSTOP, 0x00000000, 0xffff, 0xffff),
@@ -299,6 +310,8 @@ static const struct {
     { 0x880, 0x0000000f },   /* RST_I2C */
     { 0x884, 0x00000001 },   /* RST_SCIF */
     { 0x898, 0x00000007 },   /* RST_GPIO */
+    /* Not read on the EVK: TF-A's cpg_setup sets the system-reset bits */
+    { 0xb14, 0x0000008f },   /* WDTRST_SEL */
 };
 
 /* Register table index by offset / 4, or -1 */
@@ -312,6 +325,21 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
     }
     *idx = cpg_index[offset / 4];
     return &cpg_regs[*idx];
+}
+
+#define CPG_RST_WDT         0x848
+#define CPG_WDTRST_SEL      0xb14
+#define CPG_WDTOVF_MASK     0x7
+
+/* PRESETN of each watchdog channel: held while its RST_WDT bit is 0 */
+static void rzv2l_cpg_update_wdt(RenesasRZV2LCPGState *s)
+{
+    uint32_t rst = s->regs[cpg_index[CPG_RST_WDT / 4]];
+    int n;
+
+    for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
+        qemu_set_irq(s->wdt_presetn[n], !(rst & BIT(n)));
+    }
 }
 
 /* The bits a write changes: each enabled field, as wide as it is */
@@ -368,6 +396,9 @@ static MemTxResult rzv2l_cpg_read(void *opaque, hwaddr offset,
     case CPG_ZERO:
         value = 0;
         break;
+    case CPG_WDTOVF:
+        value = s->wdtovf;
+        break;
     default:
         value = s->regs[idx];
         break;
@@ -404,6 +435,10 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
     case CPG_WEN:
         mask = cpg_wen_mask(r, data);
         break;
+    case CPG_WDTOVF:
+        /* A flag clears on 1, under its write-enable bit (16 above) */
+        s->wdtovf &= ~(data & (data >> 16) & CPG_WDTOVF_MASK);
+        return MEMTX_OK;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: write to read-only register %s\n",
@@ -411,6 +446,9 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
         return MEMTX_OK;
     }
     s->regs[idx] = (s->regs[idx] & ~mask) | (data & mask);
+    if (offset == CPG_RST_WDT) {
+        rzv2l_cpg_update_wdt(s);
+    }
     return MEMTX_OK;
 }
 
@@ -443,6 +481,30 @@ static void rzv2l_cpg_reset_hold(Object *obj, ResetType type)
     }
 }
 
+static void rzv2l_cpg_reset_exit(Object *obj, ResetType type)
+{
+    rzv2l_cpg_update_wdt(RENESAS_RZV2L_CPG(obj));
+}
+
+/* The reset request of watchdog channel @n (section 7.2.4.183) */
+static void rzv2l_cpg_wdtrstb(void *opaque, int n, int level)
+{
+    RenesasRZV2LCPGState *s = RENESAS_RZV2L_CPG(opaque);
+    bool rising = level && !s->wdtrstb[n];
+
+    s->wdtrstb[n] = level;
+    if (!rising) {
+        return;
+    }
+    if (!(s->regs[cpg_index[CPG_WDTRST_SEL / 4]] & BIT(n))) {
+        trace_renesas_rzv2l_cpg_wdt_reset(n, false);
+        return;
+    }
+    trace_renesas_rzv2l_cpg_wdt_reset(n, true);
+    s->wdtovf |= BIT(n);
+    watchdog_perform_action();
+}
+
 static void rzv2l_cpg_init(Object *obj)
 {
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
@@ -452,15 +514,22 @@ static void rzv2l_cpg_init(Object *obj)
                           TYPE_RENESAS_RZV2L_CPG,
                           RENESAS_RZV2L_CPG_MMIO_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
+    qdev_init_gpio_out_named(DEVICE(obj), s->wdt_presetn, "wdt-presetn",
+                             RENESAS_RZV2L_CPG_NUM_WDT);
+    qdev_init_gpio_in_named(DEVICE(obj), rzv2l_cpg_wdtrstb, "wdtrstb",
+                            RENESAS_RZV2L_CPG_NUM_WDT);
 }
 
 static const VMStateDescription vmstate_rzv2l_cpg = {
     .name = TYPE_RENESAS_RZV2L_CPG,
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, RenesasRZV2LCPGState,
                              RENESAS_RZV2L_CPG_NUM_REGS),
+        VMSTATE_UINT32(wdtovf, RenesasRZV2LCPGState),
+        VMSTATE_BOOL_ARRAY(wdtrstb, RenesasRZV2LCPGState,
+                           RENESAS_RZV2L_CPG_NUM_WDT),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -491,6 +560,7 @@ static void rzv2l_cpg_class_init(ObjectClass *klass, const void *data)
     }
 
     rc->phases.hold = rzv2l_cpg_reset_hold;
+    rc->phases.exit = rzv2l_cpg_reset_exit;
     dc->vmsd = &vmstate_rzv2l_cpg;
     device_class_set_props(dc, rzv2l_cpg_props);
 }

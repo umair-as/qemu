@@ -14,6 +14,10 @@
  *    boot firmware leaves behind, instead of the reset values, for a
  *    kernel that is loaded directly
  *  + sysbus MMIO region 0: the CPG register bank
+ *  + named GPIO outputs "wdt-presetn" 0-2: high while CPG_RST_WDT holds
+ *    watchdog channel n in reset
+ *  + named GPIO inputs "wdtrstb" 0-2: the reset request of watchdog
+ *    channel n, active high
  */
 
 #ifndef HW_MISC_RENESAS_RZV2L_CPG_H
@@ -28,7 +32,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZV2LCPGState, RENESAS_RZV2L_CPG)
 #define RENESAS_RZV2L_CPG_MMIO_SIZE 0x10000
 
 /* Number of registers in the model's register table */
-#define RENESAS_RZV2L_CPG_NUM_REGS 189
+#define RENESAS_RZV2L_CPG_NUM_REGS 191
+
+#define RENESAS_RZV2L_CPG_NUM_WDT 3
 
 struct RenesasRZV2LCPGState {
     /*< private >*/
@@ -39,6 +45,10 @@ struct RenesasRZV2LCPGState {
 
     /* Indexed like the register table; monitors are computed, not kept */
     uint32_t regs[RENESAS_RZV2L_CPG_NUM_REGS];
+    /* CPG_WDTOVF_RST: not cleared by the system reset it reports */
+    uint32_t wdtovf;
+    bool wdtrstb[RENESAS_RZV2L_CPG_NUM_WDT];
+    qemu_irq wdt_presetn[RENESAS_RZV2L_CPG_NUM_WDT];
 
     /* Properties */
     bool direct_boot;

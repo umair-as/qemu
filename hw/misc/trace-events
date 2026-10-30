@@ -305,6 +305,7 @@ renesas_rzg2l_sysc_write(uint64_t offset, uint64_t data, unsigned size) "offset 
 # renesas_rzv2l_cpg.c
 renesas_rzv2l_cpg_read(const char *name, uint64_t offset, uint64_t data) "%s (0x%" PRIx64 ") -> 0x%" PRIx64
 renesas_rzv2l_cpg_write(const char *name, uint64_t offset, uint64_t data) "%s (0x%" PRIx64 ") <- 0x%" PRIx64
+renesas_rzv2l_cpg_wdt_reset(int channel, bool enabled) "WDT%d reset request, system reset %d"
 
 # iotkit-sysctl.c
 iotkit_sysctl_read(uint64_t offset, uint64_t data, unsigned size) "IoTKit SysCtl read: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
