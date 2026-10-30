@@ -27,6 +27,8 @@
 #include "hw/misc/renesas_rzv2l_cpg.h"
 #include "hw/char/renesas_rz_scifa.h"
 #include "hw/timer/renesas_rz_ostm.h"
+#include "hw/timer/coresight_tsgen.h"
+#include "hw/misc/arm_tzc400.h"
 #include "hw/watchdog/renesas_rzg2l_wdt.h"
 #include "hw/intc/renesas_rzg2l_irqc.h"
 #include "hw/gpio/renesas_rzg2l_pfc.h"
@@ -40,6 +42,11 @@ OBJECT_DECLARE_SIMPLE_TYPE(R9A07G054State, R9A07G054)
 
 #define R9A07G054_DDR_BASE      0x40000000
 
+/* On-chip SRAM for the Cortex-M33 (MCPU) and the Cortex-A55 (ACPU) */
+#define R9A07G054_SRAM_MCPU_BASE    0x00010000
+#define R9A07G054_SRAM_ACPU_BASE    0x00020000
+#define R9A07G054_SRAM_SIZE         (64 * KiB)
+
 enum {
     R9A07G054_NUM_CPUS  = 2,
     /* Shared peripheral interrupts, INTID 32-511 */
@@ -49,6 +56,8 @@ enum {
     /* WDT0, WDT1: Cortex-A55 cores 0 and 1; WDT2: Cortex-M33 */
     R9A07G054_NUM_WDT   = 3,
     R9A07G054_NUM_SDHI  = 2,
+    /* TZC0-3: SRAM ACPU, SRAM MCPU, SPI Multi I/O, DDR */
+    R9A07G054_NUM_TZC   = 4,
 };
 
 struct R9A07G054State {
@@ -59,6 +68,8 @@ struct R9A07G054State {
     ARMCPU cpu[R9A07G054_NUM_CPUS];
     GICv3State gic;
     RenesasRZG2LSysCState sysc;
+    CoreSightTSGenState syc;
+    ArmTZC400State tzc[R9A07G054_NUM_TZC];
     RenesasRZV2LCPGState cpg;
     RenesasRZSCIFAState scif[R9A07G054_NUM_SCIF];
     RenesasRZOSTMState ostm[R9A07G054_NUM_OSTM];
@@ -66,6 +77,8 @@ struct R9A07G054State {
     RenesasSDHIState sdhi[R9A07G054_NUM_SDHI];
     RenesasRZG2LIRQCState irqc;
     RenesasRZG2LPFCState pfc;
+    MemoryRegion sram_mcpu;
+    MemoryRegion sram_acpu;
 };
 
 #endif

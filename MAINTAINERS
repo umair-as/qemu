@@ -1045,9 +1045,13 @@ F: hw/arm/r9a07g054.c
 F: hw/arm/rzv2l-smarc.c
 F: hw/char/renesas_rz_scifa.c
 F: hw/misc/renesas_rzg2l_sysc.c
+F: hw/misc/arm_tzc400.c
+F: hw/timer/coresight_tsgen.c
 F: include/hw/arm/r9a07g054.h
 F: include/hw/char/renesas_rz_scifa.h
 F: include/hw/misc/renesas_rzg2l_sysc.h
+F: include/hw/misc/arm_tzc400.h
+F: include/hw/timer/coresight_tsgen.h
 F: docs/system/arm/rzv2l-smarc.rst
 F: tests/qtest/rzv2l-scifa-test.c
 F: tests/qtest/rzv2l-smarc-test.c

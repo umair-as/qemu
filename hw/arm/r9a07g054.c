@@ -27,9 +27,12 @@
 #include "qobject/qlist.h"
 #include "system/system.h"
 #include "hw/misc/unimp.h"
+#include "target/arm/arm-powerctl.h"
+#include "hw/core/irq.h"
 
 enum {
     R9A07G054_SCIF0,
+    R9A07G054_SYC,
     R9A07G054_CPG,
     R9A07G054_SYSC,
     R9A07G054_PFC,
@@ -41,6 +44,7 @@ enum {
 
 static const hwaddr r9a07g054_memmap[] = {
     [R9A07G054_SCIF0]       = 0x1004b800,   /* SCIFn at + n * 0x400 */
+    [R9A07G054_SYC]         = 0x11000000,
     [R9A07G054_CPG]         = 0x11010000,
     [R9A07G054_SYSC]        = 0x11020000,
     [R9A07G054_PFC]         = 0x11030000,
@@ -90,6 +94,22 @@ static const hwaddr r9a07g054_sdhi_base[R9A07G054_NUM_SDHI] = {
     0x11c00000, 0x11c10000,
 };
 #define R9A07G054_SDHI0_SPI     104
+
+/*
+ * TZC0-3 (manual section 13): base, and filter units (Figure 13.1). The
+ * manual gives no address widths (A: 32 bits for the SRAM and SPI
+ * controllers, 33 bits for DDR, which reaches 0x13fffffff).
+ */
+static const struct {
+    hwaddr base;
+    uint8_t num_filters;
+    uint8_t addr_width;
+} r9a07g054_tzc[R9A07G054_NUM_TZC] = {
+    { 0x11040000, 1, 32 },
+    { 0x11050000, 1, 32 },
+    { 0x11060000, 1, 32 },
+    { 0x11070000, 4, 33 },
+};
 
 /* WDT counter clock WDTn_CLK (manual section 21.1.1) */
 #define R9A07G054_WDT_CLK_HZ    24000000
@@ -158,6 +178,12 @@ static void r9a07g054_init(Object *obj)
                               "direct-boot");
 
     object_initialize_child(obj, "sysc", &s->sysc, TYPE_RENESAS_RZG2L_SYSC);
+    object_initialize_child(obj, "syc", &s->syc, TYPE_CORESIGHT_TSGEN);
+    for (i = 0; i < R9A07G054_NUM_TZC; i++) {
+        g_autofree char *name = g_strdup_printf("tzc%d", i);
+
+        object_initialize_child(obj, name, &s->tzc[i], TYPE_ARM_TZC400);
+    }
     object_property_add_alias(obj, "boot-mode", OBJECT(&s->sysc),
                               "boot-mode");
     object_property_add_alias(obj, "debugen", OBJECT(&s->sysc), "debugen");
@@ -194,6 +220,38 @@ static void r9a07g054_init(Object *obj)
 
         object_initialize_child(obj, name, &s->sdhi[i], TYPE_RENESAS_SDHI);
         object_property_add_alias(obj, bus, OBJECT(&s->sdhi[i]), "sd-bus");
+    }
+}
+
+/*
+ * Start a Cortex-A55 core after a pending power-off: arm_set_cpu_off()
+ * completes on the core's own thread, so queue the power-on behind it.
+ */
+static void r9a07g054_ca55_start_work(CPUState *cs, run_on_cpu_data data)
+{
+    arm_set_cpu_on_and_reset(ARM_CPU(cs)->mp_affinity);
+}
+
+/*
+ * The CPG starts (@level 1) or stops (@level 0) core @n. A core that
+ * starts is reset and runs from the reset vector it latches from the
+ * SYSC (manual section 2.2), at EL3 in AArch64.
+ */
+static void r9a07g054_ca55_run(void *opaque, int n, int level)
+{
+    R9A07G054State *s = R9A07G054(opaque);
+    ARMCPU *cpu = &s->cpu[n];
+
+    if (!level) {
+        arm_set_cpu_off(cpu->mp_affinity);
+        return;
+    }
+    cpu->rvbar_prop = rzg2l_sysc_reset_vector(&s->sysc, n);
+    if (cpu->power_state == PSCI_OFF) {
+        arm_set_cpu_on_and_reset(cpu->mp_affinity);
+    } else {
+        async_run_on_cpu(CPU(cpu), r9a07g054_ca55_start_work,
+                         RUN_ON_CPU_NULL);
     }
 }
 
@@ -289,6 +347,30 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->cpg), 0,
                     r9a07g054_memmap[R9A07G054_CPG]);
+    for (i = 0; i < R9A07G054_NUM_CPUS; i++) {
+        qdev_connect_gpio_out_named(DEVICE(&s->cpg), "ca55-run", i,
+                                    qemu_allocate_irq(r9a07g054_ca55_run,
+                                                      s, i));
+    }
+
+    /* SYC: the system counter (manual section 15) */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->syc), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->syc), 0,
+                    r9a07g054_memmap[R9A07G054_SYC]);
+
+    /* TZC0-3: programmed by the boot firmware, not enforced */
+    for (i = 0; i < R9A07G054_NUM_TZC; i++) {
+        DeviceState *tzc = DEVICE(&s->tzc[i]);
+
+        qdev_prop_set_uint8(tzc, "num-filters", r9a07g054_tzc[i].num_filters);
+        qdev_prop_set_uint8(tzc, "addr-width", r9a07g054_tzc[i].addr_width);
+        if (!sysbus_realize(SYS_BUS_DEVICE(tzc), errp)) {
+            return;
+        }
+        sysbus_mmio_map(SYS_BUS_DEVICE(tzc), 0, r9a07g054_tzc[i].base);
+    }
 
     /* SYSC */
     qdev_prop_set_uint32(DEVICE(&s->sysc), "lsi-devid", R9A07G054_LSI_DEVID);
@@ -378,6 +460,21 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
                                     qdev_get_gpio_in_named(DEVICE(sbd),
                                                            "ixrst", 0));
     }
+
+    /*
+     * On-chip SRAM (manual Table 5.1): the boot ROM loads BL2 into it, and
+     * BL2 leaves its parameters for BL31 there
+     */
+    if (!memory_region_init_ram(&s->sram_mcpu, OBJECT(dev), "sram-mcpu",
+                                R9A07G054_SRAM_SIZE, errp) ||
+        !memory_region_init_ram(&s->sram_acpu, OBJECT(dev), "sram-acpu",
+                                R9A07G054_SRAM_SIZE, errp)) {
+        return;
+    }
+    memory_region_add_subregion(get_system_memory(), R9A07G054_SRAM_MCPU_BASE,
+                                &s->sram_mcpu);
+    memory_region_add_subregion(get_system_memory(), R9A07G054_SRAM_ACPU_BASE,
+                                &s->sram_acpu);
 
     /* Unimplemented blocks */
     for (i = 0; i < ARRAY_SIZE(r9a07g054_unimp); i++) {
