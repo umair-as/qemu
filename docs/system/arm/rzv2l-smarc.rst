@@ -28,11 +28,15 @@ Supported devices
  * Watchdog timers WDT0-2. A watchdog reset request resets the system
    when the CPG's ``CPG_WDTRST_SEL`` allows it; ``-action watchdog=``
    selects what a reset does.
+ * SD/MMC host interfaces SDHI0 and SDHI1, with their built-in DMA
+   controllers, for SD memory cards. Transfers complete at once, so the
+   data timeout never fires; SDIO, HPI and the sampling clock controller
+   (bus tuning) are not modelled.
 
 Missing devices
 ---------------
 
-Ethernet, SD/eMMC, I2C, USB, the QSPI controller, the display, CAN-FD,
+Ethernet, I2C, USB, the QSPI controller, the display, CAN-FD,
 the ADC, the thermal sensor and the DMA controller are stubs: they log
 every access and read as zero, so their drivers fail when they probe.
 Every other on-chip block is missing. The serial ports have no modem
@@ -58,6 +62,21 @@ Machine options
 
 The machine has exactly two CPUs and 2 GiB of RAM; other ``-smp`` and
 ``-m`` values are refused.
+
+SD cards
+--------
+
+``-drive if=sd,index=0`` is the card in the slot on the SMARC module
+(SDHI0), the slot the board boots from in eSD mode; ``index=1`` is the
+slot on the carrier board (SDHI1). A slot without a drive is empty. The
+image size must be a power of two up to 2 GiB, or a multiple of 512 KiB
+above. Linux numbers the cards in probe order unless the device tree has
+``mmc`` aliases.
+
+.. code-block:: bash
+
+  $ qemu-system-aarch64 -M rzv2l-smarc ... \
+      -drive if=sd,index=0,format=raw,file=sd.img
 
 Boot options
 ------------
