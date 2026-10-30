@@ -56,6 +56,9 @@
 #define TIC                 0x378
 #define TIS                 0x37c
 #define ISS                 0x380
+#define CIE                 0x384
+#define RIC3                0x388
+#define RIS3                0x38c
 
 /* E-MAC (Table 30.5) */
 #define CXR20               0x500   /* ECMR */
@@ -65,12 +68,15 @@
 #define CXR2B               0x528   /* PSR */
 #define CXR31               0x530
 #define CXR35               0x540
+#define CXR2A               0x508   /* RFLR */
+#define CXR57               0x778   /* multicast frames received */
 #define CXR24               0x5c0   /* MAHR */
 #define CXR25               0x5c8   /* MALR */
 #define MDIOMOD             0x790
 
 /* TOE (Table 30.6) */
 #define CSR0                0x800
+#define CSR1                0x804
 #define CSR2                0x808
 
 /* Reset values (Tables 30.4, 30.5; section 30.4.1.4) */
@@ -102,7 +108,15 @@
 #define ECMR_RCPT           (1u << 25)
 #define ECSR_LINKI          (1u << 2)
 #define LINKIM              (1u << 2)
+#define CSR0_TPE            (1u << 4)
 #define CSR0_RPE            (1u << 5)
+/* CSR1: TIP4, TUDP4, TUDP6 (section 30.4.3.2) */
+#define CSR1_IP4_UDP4_UDP6  0x00200021
+/* CCC: OPC, DTSR, RDFD, ERCS, FCE writable; BOC only 0 (30.4.1.1) */
+#define CCC_RW              0x02040303
+#define CRIE                (1u << 0)
+#define RDPF                (1u << 0)
+#define EI                  (1u << 13)
 /* CSR2: RIP4, RTCP4, RUDP4, RICMP4 (section 30.4.3.3) */
 #define CSR2_IPV4_ALL       0x00000071
 
@@ -119,7 +133,9 @@
 #define DT_FSTART           0x5u
 #define DT_FEND             0x6u
 #define DT_FSINGLE          0x7u
+#define DT_LINK             0x8u
 #define DT_LINKFIX          0x9u
+#define DT_EOS              0xau
 #define DT_FEMPTY           0xcu
 #define MSC_CEEF            0x40    /* checksum error (Table 30.13) */
 #define MSC_UNSUPPORTED     0x20
@@ -127,6 +143,7 @@
 
 /* ESR.ET (section 30.4.1.6) */
 #define ET_RD_DATA          4
+#define ET_WR_DATA          5
 #define ET_INTERPRET        2
 
 /* The PHY: IEEE 802.3 22.2.4, and the board's device tree */
@@ -393,6 +410,10 @@ static void test_cpg_reset(void)
     qtest_writel(qts, CPG + CPG_RST_ETH, 0x00010000);
     g_assert_cmphex(eth_read(qts, CXR24), ==, 0);
     g_assert_cmphex(eth_read(qts, CSR), ==, CSR_RESET);
+    /* A link lost while the reset is held reads 0 after the release */
+    set_link(qts, false);
+    gbeth_release(qts);
+    g_assert_cmphex(eth_read(qts, CXR2B) & 1, ==, 0);
     qtest_quit(qts);
     close(fd);
 }
@@ -607,7 +628,7 @@ static void test_rx(void)
     g_assert_cmphex(qtest_readl(qts, RX_RING + 0), ==, DT_FSTART << 28 | 64);
     g_assert_cmphex(qtest_readl(qts, RX_RING + 8), ==, DT_FMID << 28 | 64);
     g_assert_cmphex(qtest_readl(qts, RX_RING + 16), ==,
-                    DT_FEND << 28 | 1u << 13 | 22);
+                    DT_FEND << 28 | 22);
     for (i = 0; i < 3; i++) {
         qtest_memread(qts, RX_BUF + 0x100 * i, got + 64 * i,
                       MIN(64, sizeof(frame) - 64 * i));
@@ -622,12 +643,12 @@ static void test_rx(void)
     sock_send(fd, frame, 40);
     wait_rx(qts, RIS0, FRF0);
     g_assert_cmphex(qtest_readl(qts, RX_RING + 24), ==,
-                    DT_FSINGLE << 28 | 1u << 13 | 60);
+                    DT_FSINGLE << 28 | 60);
     eth_write(qts, RIS0, ~FRF0);
     sock_send(fd, frame, 40);
     wait_rx(qts, RIS0, FRF0);
     g_assert_cmphex(qtest_readl(qts, RX_RING + 0), ==,
-                    DT_FSINGLE << 28 | 1u << 13 | 60);
+                    DT_FSINGLE << 28 | 60);
     g_assert_cmphex(eth_read(qts, CDAR4), ==, RX_RING + 8);
     eth_write(qts, RIS0, ~FRF0);
 
@@ -647,7 +668,7 @@ static void test_rx(void)
     sock_send(fd, frame, 40);
     wait_rx(qts, RIS0, FRF0);
     g_assert_cmphex(qtest_readl(qts, RX_RING + 8), ==,
-                    DT_FSINGLE << 28 | 1u << 13 | 60);
+                    DT_FSINGLE << 28 | 60);
     qtest_quit(qts);
     close(fd);
 }
@@ -688,7 +709,7 @@ static void test_rx_checksum(void)
     sock_send(fd, frame, 60);
     wait_rx(qts, RIS0, FRF0);
     g_assert_cmphex(qtest_readl(qts, RX_RING + 0), ==,
-                    DT_FSINGLE << 28 | 1u << 13 | 64);
+                    DT_FSINGLE << 28 | 64);
     qtest_memread(qts, RX_BUF + 60, trailer, 4);
     g_assert_cmphex((uint32_t)ldl_le_p(trailer), ==, 0);
     eth_write(qts, RIS0, ~FRF0);
@@ -779,11 +800,209 @@ static void test_opmode(void)
     set_opc(qts, OPC_CONFIG);
     g_assert_cmphex(eth_read(qts, RIS0), ==, 0);
     g_assert_cmphex(eth_read(qts, ISS), ==, 0);
+    /* CDARq read 0 out of OPERATION (section 30.4.1.5) */
+    g_assert_cmphex(eth_read(qts, CDAR0), ==, 0);
+    g_assert_cmphex(eth_read(qts, CDAR4), ==, 0);
+    /* Only CCC's writable bits keep a 1 (section 30.4.1.1) */
+    eth_write(qts, CCC, 0xfffffffc | OPC_CONFIG);
+    g_assert_cmphex(eth_read(qts, CCC), ==, CCC_RW & ~2u);
+    eth_write(qts, CCC, OPC_CONFIG);
+    /* CXR31 bits 3:0 are read/write (section 30.4.2.8) */
+    eth_write(qts, CXR31, 0xffffffff);
+    g_assert_cmphex(eth_read(qts, CXR31), ==, 0xf);
     /* DBAT is kept, and reloads the queues on the next OPERATION */
     g_assert_cmphex(eth_read(qts, DBAT), ==, DBAT_TABLE);
     set_opc(qts, OPC_OPERATION);
     g_assert_cmphex(eth_read(qts, CDAR0), ==, DBAT_TABLE);
     g_assert_cmphex(eth_read(qts, CDAR4), ==, DBAT_TABLE + 0x20);
+    qtest_quit(qts);
+    close(fd);
+}
+
+/*
+ * Transmission (Table 30.14): an EOS is written back EEMPTY and stops
+ * the queue, and the next request starts at the next descriptor; a LINK
+ * is written back LEMPTY. With CSR0.TPE and CSR1, the checksum engine
+ * fills in the IPv4 header and UDP checksums (IPv4 and IPv6), and keeps
+ * an IPv4 UDP checksum of 0 (section 30.5.6.2). The expected sums are
+ * the RFC 768/791/8200 checksums of the frames, computed independently.
+ */
+static void test_tx_more(void)
+{
+    static const uint8_t ip4[] = {
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x01, 0x08, 0x00,
+        /* IPv4 10.0.2.15 -> 10.0.2.2, UDP, 32 bytes, checksum 0 */
+        0x45, 0x00, 0x00, 0x20, 0x00, 0x00, 0x40, 0x00,
+        0x40, 0x11, 0x00, 0x00, 0x0a, 0x00, 0x02, 0x0f,
+        0x0a, 0x00, 0x02, 0x02,
+        /* UDP 5678 -> 1234, 12 bytes, a partial sum to replace, "wxyz" */
+        0x16, 0x2e, 0x04, 0xd2, 0x00, 0x0c, 0x12, 0x34,
+        0x77, 0x78, 0x79, 0x7a,
+    };
+    static const uint8_t ip6[] = {
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x02, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x01, 0x86, 0xdd,
+        /* IPv6 fe80::1 -> fe80::2, UDP, payload 12 bytes */
+        0x60, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x11, 0x40,
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
+        0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02,
+        0x16, 0x2e, 0x04, 0xd2, 0x00, 0x0c, 0x12, 0x34,
+        0x77, 0x78, 0x79, 0x7a,
+    };
+    uint8_t frame[80], got[80];
+    int fd;
+    QTestState *qts = gbeth_init(&fd);
+
+    gbeth_start(qts, 0);
+    eth_write(qts, CSR1, CSR1_IP4_UDP4_UDP6);
+    eth_write(qts, CSR0, CSR0_TPE);
+
+    memset(frame, 0, sizeof(frame));
+    memcpy(frame, ip4, sizeof(ip4));
+    qtest_memwrite(qts, TX_BUF, frame, 60);
+    memcpy(frame, ip6, sizeof(ip6));
+    qtest_memwrite(qts, TX_BUF + 0x100, frame, sizeof(ip6));
+    memcpy(frame, ip4, sizeof(ip4));
+    frame[40] = frame[41] = 0;      /* UDP checksum 0: none */
+    qtest_memwrite(qts, TX_BUF + 0x200, frame, 60);
+
+    desc_write(qts, TX_RING + 0, DT_FSINGLE, 60, TX_BUF);
+    desc_write(qts, TX_RING + 8, DT_EOS, 0, 0);
+    desc_write(qts, TX_RING + 16, DT_LINK, 0, TX_RING + 64);
+    desc_write(qts, TX_RING + 64, DT_FSINGLE, sizeof(ip6), TX_BUF + 0x100);
+    desc_write(qts, TX_RING + 72, DT_FSINGLE, 60, TX_BUF + 0x200);
+    desc_write(qts, TX_RING + 80, DT_EEMPTY, 0, 0);
+
+    eth_write(qts, TCCR, TSRQ0);
+    g_assert_cmpuint(sock_recv(fd, got, sizeof(got)), ==, 60);
+    g_assert_cmphex(lduw_be_p(got + 24), ==, 0x22bd);
+    g_assert_cmphex(lduw_be_p(got + 40), ==, 0xdbd2);
+    g_assert_cmpmem(got + 42, 4, "wxyz", 4);
+    g_assert_cmphex(qtest_readl(qts, TX_RING + 8) >> 28, ==, DT_EEMPTY);
+    g_assert_cmphex(eth_read(qts, TCCR) & TSRQ0, ==, 0);
+    g_assert_cmphex(eth_read(qts, CDAR0), ==, TX_RING + 16);
+
+    /* The next request: the LINK, then the two frames */
+    eth_write(qts, TCCR, TSRQ0);
+    g_assert_cmpuint(sock_recv(fd, got, sizeof(got)), ==, sizeof(ip6));
+    g_assert_cmphex(lduw_be_p(got + 60), ==, 0xf6de);
+    g_assert_cmpuint(sock_recv(fd, got, sizeof(got)), ==, 60);
+    g_assert_cmphex(lduw_be_p(got + 24), ==, 0x22bd);
+    g_assert_cmphex(lduw_be_p(got + 40), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, TX_RING + 16) >> 28, ==, DT_LEMPTY);
+    g_assert_cmphex(eth_read(qts, CDAR0), ==, TX_RING + 80);
+    qtest_quit(qts);
+    close(fd);
+}
+
+/*
+ * Reception: the address filter (section 30.4.2.1, PRM = 0) takes
+ * frames to CXR24/CXR25, broadcast and multicast frames, and drops
+ * other unicast ones; MSC bit 7 and CXR57 mark multicast frames only
+ * (Table 30.13, section 30.4.2.27; that broadcast is not counted is an
+ * inference: the manual names the three kinds apart). A frame longer
+ * than CXR2A allows (1518 bytes with the CRC for 0, section 30.4.2.2)
+ * is dropped. A descriptor with DIE = 1 sets RIS3.RDPF; CIE gates it in
+ * pif_int_n, not in ISS (section 30.4.1.42).
+ */
+static void test_rx_filter(void)
+{
+    static const uint8_t bcast[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+    static const uint8_t mcast[6] = { 0x01, 0x00, 0x5e, 0x00, 0x00, 0xfb };
+    static const uint8_t other[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x09 };
+    static uint8_t frame[1600];
+    int fd, i;
+    QTestState *qts = gbeth_init(&fd);
+
+    qtest_irq_intercept_out_named(qts, "/machine/soc/eth0", "sysbus-irq");
+    for (i = 0; i < 4; i++) {
+        desc_write(qts, RX_RING + 8 * i, DT_FEMPTY, 2048,
+                   RX_BUF + 0x1000 * i);
+    }
+    desc_write(qts, RX_RING + 32, DT_LINKFIX, 0, RX_RING);
+    gbeth_start(qts, 0);
+
+    frame_fill(frame, 60, 0x70);
+    memcpy(frame, other, 6);
+    sock_send(fd, frame, 60);           /* dropped: not this address */
+    memcpy(frame, bcast, 6);
+    sock_send(fd, frame, 60);
+    wait_rx(qts, RIS0, FRF0);
+    g_assert_cmphex(qtest_readl(qts, RX_RING + 0), ==, DT_FSINGLE << 28 | 60);
+    {
+        uint8_t da[6];
+
+        /* The first frame stored is the broadcast one */
+        qtest_memread(qts, RX_BUF, da, 6);
+        g_assert_cmpmem(da, 6, bcast, 6);
+    }
+    eth_write(qts, RIS0, ~FRF0);
+    memcpy(frame, mcast, 6);
+    sock_send(fd, frame, 60);
+    wait_rx(qts, RIS0, FRF0);
+    g_assert_cmphex(qtest_readl(qts, RX_RING + 8), ==,
+                    DT_FSINGLE << 28 | MSC_MC << 16 | 60);
+    g_assert_cmphex(eth_read(qts, CXR57), ==, 1);
+    eth_write(qts, RIS0, ~FRF0);
+
+    /* 1514 + CRC = 1518 bytes fits; one more byte does not */
+    frame_fill(frame, 1515, 0x10);
+    sock_send(fd, frame, 1515);
+    sock_send(fd, frame, 1514);
+    wait_rx(qts, RIS0, FRF0);
+    g_assert_cmphex(qtest_readl(qts, RX_RING + 16), ==,
+                    DT_FSINGLE << 28 | 1514);
+    eth_write(qts, RIS0, ~FRF0);
+    eth_write(qts, CXR2A, 2000);
+    sock_send(fd, frame, 1515);
+    wait_rx(qts, RIS0, FRF0);
+    g_assert_cmphex(qtest_readl(qts, RX_RING + 24), ==,
+                    DT_FSINGLE << 28 | 1515);
+    eth_write(qts, RIS0, ~FRF0);
+
+    /* DIE = 1: RIS3.RDPF; ISS shows it, the line needs CIE.CRIE */
+    eth_write(qts, RIC0, 0);
+    eth_write(qts, RIC3, RDPF);
+    desc_write(qts, RX_RING + 0, DT_FEMPTY, 2048, RX_BUF);
+    qtest_writel(qts, RX_RING + 0, DT_FEMPTY << 28 | 1u << 24 | 2048);
+    frame_fill(frame, 60, 0x20);
+    sock_send(fd, frame, 60);
+    wait_rx(qts, RIS3, RDPF);
+    g_assert_cmphex(eth_read(qts, ISS) & ISS_FRM, ==, ISS_FRM);
+    g_assert_false(qtest_get_irq(qts, 0));
+    eth_write(qts, CIE, CRIE);
+    g_assert_true(qtest_get_irq(qts, 0));
+    qtest_quit(qts);
+    close(fd);
+}
+
+/*
+ * A failed write of received data (section 30.5.5.4): the descriptor
+ * is written back with EI, CDAR moves on, EIS.QEF with ESR.ET = 5
+ */
+static void test_rx_dma_error(void)
+{
+    uint8_t frame[60];
+    int fd;
+    QTestState *qts = gbeth_init(&fd);
+
+    desc_write(qts, RX_RING + 0, DT_FEMPTY, 64, UNMAPPED);
+    desc_write(qts, RX_RING + 8, DT_FEMPTY, 64, RX_BUF);
+    desc_write(qts, RX_RING + 16, DT_LINKFIX, 0, RX_RING);
+    gbeth_start(qts, 0);
+    frame_fill(frame, sizeof(frame), 0x30);
+    sock_send(fd, frame, sizeof(frame));
+    wait_rx(qts, EIS, QEF);
+    g_assert_cmphex(eth_read(qts, ESR), ==, ET_WR_DATA << 8 | 4);
+    g_assert_cmphex(qtest_readl(qts, RX_RING + 0) & (0xfu << 28 | EI), ==,
+                    DT_FSINGLE << 28 | EI);
+    g_assert_cmphex(eth_read(qts, CDAR4), ==, RX_RING + 8);
+    g_assert_cmphex(eth_read(qts, RIS0), ==, 0);
+    /* The next frame goes to the next descriptor */
+    sock_send(fd, frame, sizeof(frame));
+    wait_rx(qts, RIS0, FRF0);
+    g_assert_cmphex(qtest_readl(qts, RX_RING + 8), ==, DT_FSINGLE << 28 | 60);
     qtest_quit(qts);
     close(fd);
 }
@@ -802,6 +1021,9 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-gbeth/rx-checksum", test_rx_checksum);
     qtest_add_func("/rzv2l-gbeth/tx-errors", test_tx_errors);
     qtest_add_func("/rzv2l-gbeth/opmode", test_opmode);
+    qtest_add_func("/rzv2l-gbeth/tx-more", test_tx_more);
+    qtest_add_func("/rzv2l-gbeth/rx-filter", test_rx_filter);
+    qtest_add_func("/rzv2l-gbeth/rx-dma-error", test_rx_dma_error);
 
     return g_test_run();
 }
