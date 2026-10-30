@@ -23,9 +23,13 @@
  *   block can be read or written. Each access moves as many bytes as it
  *   is wide; HOST_MODE is stored only.
  * - With DMA, the built-in DMAC moves every block between the card and
- *   DM_DTRAN_ADDR once DM_CM_DTRAN_CTRL.DM_START is written after the
- *   response (Figures 40.22 and 40.23), then sets DTRANEND0 (to the
- *   card) or DTRANEND1 (from the card) in DM_CM_INFO1.
+ *   DM_DTRAN_ADDR once DM_CM_DTRAN_CTRL.DM_START is written, then sets
+ *   DTRANEND0 (to the card) or DTRANEND1 (from the card) in DM_CM_INFO1.
+ *   DMASDRW may be set before the command, as Linux does, or after the
+ *   response, as Figures 40.22 and 40.23 do; then the DMAC takes over
+ *   from SD_BUF0, starting with the block already in the buffer.
+ * - In normal mode (SD_CMD[10:8] = 000) the card's answer gives the
+ *   response length; only CMD17, CMD18, CMD24 and CMD25 carry data.
  * - Flags in SD_INFO1, SD_INFO2, SDIO_INFO1 and DM_CM_INFO1/2 clear when
  *   0 is written to them; writing 1 leaves them. OXMNIRQ is high while a
  *   card access, card detect or DMAC flag is set and not masked, as is
@@ -304,8 +308,8 @@ static void sdhi_end_sequence(RenesasSDHIState *s, bool access_end)
 
 /*
  * Send one command to the card. @rtype is the SD_CMD response type, or
- * MODE_NORMAL to take the response the card gives. A command the card
- * does not answer, or answers with the wrong length, times out.
+ * MODE_NORMAL to take whichever response the card gives. A command the
+ * card does not answer, or answers with the wrong length, times out.
  */
 static bool sdhi_send(RenesasSDHIState *s, uint8_t index, uint32_t arg,
                       int rtype, bool in_sequence)
@@ -325,7 +329,7 @@ static bool sdhi_send(RenesasSDHIState *s, uint8_t index, uint32_t arg,
         ok = rlen == 16;
         break;
     case MODE_NORMAL:
-        ok = rlen == 4 || rlen == 16 || rlen == 0;
+        ok = rlen == 4 || rlen == 16;
         break;
     default:
         ok = rlen == 4;
@@ -385,6 +389,7 @@ static void sdhi_start_command(RenesasSDHIState *s)
     uint8_t index = FIELD_EX32(cmd, SD_CMD, INDEX);
     int mode = FIELD_EX32(cmd, SD_CMD, MODE);
     bool data, read, multi, no_cmd12;
+    int rtype = mode;
 
     if (mode == 1 || mode == 2 || (cmd & BIT(15)) ||
         FIELD_EX32(cmd, SD_CMD, ACMD) > 1) {
@@ -398,6 +403,10 @@ static void sdhi_start_command(RenesasSDHIState *s)
         read = index == 17 || index == 18;
         multi = index == 18 || index == 25;
         no_cmd12 = false;
+        /* Normal mode: CMD0, CMD4 and CMD15 have no response */
+        if (index == 0 || index == 4 || index == 15) {
+            rtype = MODE_NO_RSP;
+        }
         qemu_log_mask(LOG_UNIMP, "%s: SD_CMD normal mode, CMD%u\n",
                       __func__, index);
     } else {
@@ -417,7 +426,7 @@ static void sdhi_start_command(RenesasSDHIState *s)
     }
 
     s->busy = true;
-    if (!sdhi_send(s, index, s->sd_arg, mode, false)) {
+    if (!sdhi_send(s, index, s->sd_arg, rtype, false)) {
         /* Halted by the response timeout: INFO0, and INFO2 with data */
         s->sd_info1 |= R_SD_INFO1_INFO0_MASK;
         sdhi_end_sequence(s, data);
@@ -465,8 +474,16 @@ static void sdhi_dma_run(RenesasSDHIState *s)
                              : R_DM_CM_INFO2_DTRANERR0_MASK;
     uint64_t addr = s->dm_dtran_addr;
     MemTxResult res = MEMTX_OK;
+    bool loaded = false;
 
-    if (!s->dma_wait) {
+    /*
+     * Linux enables DMA before the command, the manual's flowcharts after
+     * the response (Figures 40.22-40.23): then the first block is waiting
+     * in SD_BUF (read) or SD_BUF is empty (write), and the DMAC takes over.
+     */
+    if (!s->dma_wait &&
+        (!(s->data_read || s->data_write) || s->buf_pos ||
+         !(s->cc_ext_mode & R_CC_EXT_MODE_DMASDRW_MASK))) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: DM_START without a data transfer waiting\n",
                       __func__);
@@ -483,6 +500,10 @@ static void sdhi_dma_run(RenesasSDHIState *s)
         return;
     }
 
+    if (!s->dma_wait) {
+        loaded = s->data_read;
+        s->sd_info2 &= ~(R_SD_INFO2_BRE_MASK | R_SD_INFO2_BWE_MASK);
+    }
     s->dma_wait = false;
     trace_renesas_sdhi_dma(to_memory, addr, s->blocks_left, s->buf_len);
     while (s->blocks_left && res == MEMTX_OK) {
@@ -490,7 +511,12 @@ static void sdhi_dma_run(RenesasSDHIState *s)
             res = MEMTX_DECODE_ERROR;
             break;
         }
-        if (to_memory) {
+        if (to_memory && loaded) {
+            /* The block the card sent before the DMAC was started */
+            loaded = false;
+            res = dma_memory_write(&s->dma_as, addr, s->buf, s->buf_len,
+                                   MEMTXATTRS_UNSPECIFIED);
+        } else if (to_memory) {
             if (!sdbus_data_ready(&s->sdbus)) {
                 s->sd_info2 |= R_SD_INFO2_ERR3_MASK;
                 s->sd_err_sts2 |= R_SD_ERR_STS2_E4_MASK;

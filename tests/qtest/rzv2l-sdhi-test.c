@@ -68,6 +68,7 @@
 #define INFO0               (1u << 0)   /* response end */
 #define INFO2               (1u << 2)   /* access end */
 #define INFO5               (1u << 5)   /* card detect pin */
+#define INFO7               (1u << 7)   /* write protect pin: 1 = writable */
 #define ERR6                (1u << 6)   /* response timeout */
 #define BRE                 (1u << 8)
 #define BWE                 (1u << 9)
@@ -146,6 +147,16 @@ static void card_init(QTestState *qts, uint32_t base)
     }
     g_assert_cmphex(ocr & (1u << 31), !=, 0);
     cmd(qts, base, CMD_R2 | 2, 0);
+    /*
+     * Table 40.3: an R2 response R[127:8] fills SD_RSP54 (R[127:72]) and
+     * SD_RSP10 (R[71:8]). The card's CID (QEMU's SD card) begins MID
+     * 0xaa, OID "XY", PNM "QEMU!", PRV, PSN 0xdeadbeef.
+     */
+    g_assert_cmphex(qtest_readq(qts, base + SD_RSP54), ==,
+                    0x00aa585951454d55ull);
+    g_assert_cmphex(qtest_readq(qts, base + SD_RSP10) >> 56, ==, '!');
+    g_assert_cmphex((qtest_readq(qts, base + SD_RSP10) >> 16) & 0xffffffff,
+                    ==, 0xdeadbeef);
     rca = cmd(qts, base, CMD_R1 | 3, 0) & 0xffff0000;
     cmd(qts, base, CMD_R1B | 7, rca);
 }
@@ -248,6 +259,39 @@ static void test_no_card(void)
     wr(qts, b, SD_INFO1, ~INFO0);
     g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO0, ==, 0);
     g_assert_false(qtest_get_irq(qts, 0));
+
+    /* A data command halted by the timeout sets the access end too */
+    clear_info(qts, b);
+    wr(qts, b, SD_CMD, CMD_R1 | CMD_DATA | CMD_READ | 17);
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & (INFO0 | INFO2), ==, INFO0 | INFO2);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (ERR6 | CBSY), ==, ERR6);
+
+    /* Normal mode (SD_CMD[10:8] = 000): CMD8 needs a response */
+    clear_info(qts, b);
+    wr(qts, b, SD_CMD, 8);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & ERR6, ==, ERR6);
+    qtest_quit(qts);
+}
+
+/* SOFT_RST.SDRST = 0 resets the registers marked so in section 40.2 */
+static void test_soft_reset(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+    uint32_t b = SDHI0_BASE;
+
+    sdhi_release(qts, b);
+    wr(qts, b, SD_OPTION, 0x80ee);
+    wr(qts, b, SD_SIZE, 0x40);
+    wr(qts, b, SD_STOP, 0x100);
+    wr(qts, b, SOFT_RST, 0x6);
+    g_assert_cmphex(rd(qts, b, SOFT_RST), ==, 0x6);
+    g_assert_cmphex(rd(qts, b, SD_OPTION), ==, SD_OPTION_RESET);
+    g_assert_cmphex(rd(qts, b, SD_STOP), ==, 0);
+    g_assert_cmphex(rd(qts, b, SD_CLK_CTRL) & 0x100, ==, 0);
+    /* SD_SIZE has no such note: it keeps its value */
+    g_assert_cmphex(rd(qts, b, SD_SIZE), ==, 0x40);
+    wr(qts, b, SOFT_RST, 0x7);
+    g_assert_cmphex(rd(qts, b, SOFT_RST), ==, SOFT_RST_RESET);
     qtest_quit(qts);
 }
 
@@ -261,7 +305,7 @@ static void test_pio(void)
     int i;
 
     sdhi_release(qts, b);
-    g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO5, ==, INFO5);
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & (INFO5 | INFO7), ==, INFO5 | INFO7);
     card_init(qts, b);
 
     cmd(qts, b, CMD_R1 | CMD_DATA | CMD_READ | 17, 0x400);
@@ -319,7 +363,7 @@ static void test_dma(void)
     sdhi_release(qts, b);
     card_init(qts, b);
 
-    /* Read three blocks from 0x1000 into memory (Figure 40.22) */
+    /* Read three blocks from 0x1000, DMA enabled before the command */
     wr(qts, b, SD_STOP, 0x100);
     wr(qts, b, SD_SECCNT, 3);
     wr(qts, b, CC_EXT_MODE, 0x1012);
@@ -351,11 +395,32 @@ static void test_dma(void)
     wr(qts, b, DM_CM_INFO1, ~DTRANEND1);
     g_assert_cmphex(rd(qts, b, DM_CM_INFO1) & DTRANEND1, ==, 0);
 
-    /* Write three blocks from memory to 0x4000 (Figure 40.23) */
+    /*
+     * Figure 40.22 order: the command runs with DMASDRW = 0 and DMA is
+     * enabled after the response; the DMAC takes over from SD_BUF.
+     */
+    wr(qts, b, CC_EXT_MODE, 0x1010);
+    wr(qts, b, SD_SECCNT, 2);
+    cmd(qts, b, CMD_R1 | CMD_DATA | CMD_READ | CMD_MULTI | 18, 0x2000);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (CBSY | BRE), ==, CBSY | BRE);
+    wr(qts, b, CC_EXT_MODE, 0x1012);
+    wr(qts, b, DM_DTRAN_ADDR, DMA_BUF);
+    wr(qts, b, DM_CM_DTRAN_CTRL, 1);
+    g_assert_cmphex(rd(qts, b, DM_CM_INFO1) & DTRANEND1, ==, DTRANEND1);
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO2, ==, INFO2);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (CBSY | BRE), ==, 0);
+    qtest_memread(qts, DMA_BUF, mem, 2 * 512);
+    for (i = 0; i < 2 * 512; i++) {
+        g_assert_cmphex(mem[i], ==, card_byte(0x2000 + i));
+    }
+    wr(qts, b, DM_CM_INFO1, ~DTRANEND1);
+
+    /* Write three blocks to 0x4000, DMA enabled before the command */
     for (i = 0; i < 3 * 512; i++) {
         mem[i] = i * 13 + 5;
     }
     qtest_memwrite(qts, DMA_BUF, mem, 3 * 512);
+    wr(qts, b, SD_SECCNT, 3);
     cmd(qts, b, CMD_R1 | CMD_DATA | CMD_MULTI | 25, 0x4000);
     g_assert_cmphex(rd(qts, b, SD_INFO2) & (CBSY | BWE), ==, CBSY);
     wr(qts, b, DM_CM_DTRAN_MODE, 0x00000030);
@@ -385,6 +450,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-sdhi/reset-values", test_reset_values);
     qtest_add_func("/rzv2l-sdhi/cpg-reset", test_cpg_reset);
     qtest_add_func("/rzv2l-sdhi/no-card", test_no_card);
+    qtest_add_func("/rzv2l-sdhi/soft-reset", test_soft_reset);
     qtest_add_func("/rzv2l-sdhi/pio", test_pio);
     qtest_add_func("/rzv2l-sdhi/dma", test_dma);
     return g_test_run();
