@@ -7,8 +7,9 @@
 /*
  * Two Cortex-A55 cores, a GIC-600 (modelled by the GICv3), the Clock
  * Pulse Generator, the System Controller identification registers, the
- * five SCIFA serial ports, the three OS timers, the pin function
- * controller and the interrupt control unit's registers. A few blocks
+ * five SCIFA serial ports, the three OS timers, the three watchdog
+ * timers, the pin function controller and the interrupt control unit's
+ * registers. A few blocks
  * that a kernel probes are stubbed (see r9a07g054_unimp). Everything
  * else in the address space is left unmapped, so guest accesses to
  * blocks that are not modelled yet fault instead of reading as zero.
@@ -77,6 +78,15 @@ static const uint64_t r9a07g054_mp_affinity[R9A07G054_NUM_CPUS] = {
 
 /* OSTM0-2 interrupts are SPI 46-48 */
 #define R9A07G054_OSTM0_SPI     46
+
+/* WDTn: WDTINT is SPI 49 + 2n, PERROUT SPI 50 + 2n (Table 8.2) */
+static const hwaddr r9a07g054_wdt_base[R9A07G054_NUM_WDT] = {
+    0x12800800, 0x12800c00, 0x12800400,
+};
+#define R9A07G054_WDT0_SPI      49
+
+/* WDT counter clock WDTn_CLK (manual section 21.1.1) */
+#define R9A07G054_WDT_CLK_HZ    24000000
 
 /*
  * OSTM count clock P0 (manual section 20.3.2): PLL2 1600 MHz / 2 / 8 with
@@ -153,6 +163,12 @@ static void r9a07g054_init(Object *obj)
         g_autofree char *name = g_strdup_printf("ostm%d", i);
 
         object_initialize_child(obj, name, &s->ostm[i], TYPE_RENESAS_RZ_OSTM);
+    }
+
+    for (i = 0; i < R9A07G054_NUM_WDT; i++) {
+        g_autofree char *name = g_strdup_printf("wdt%d", i);
+
+        object_initialize_child(obj, name, &s->wdt[i], TYPE_RENESAS_RZG2L_WDT);
     }
 }
 
@@ -285,6 +301,28 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
                         i * RENESAS_RZ_OSTM_MMIO_SIZE);
         sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(gicdev,
                            R9A07G054_OSTM0_SPI + i));
+    }
+
+    /* WDT0-2: reset lines to and from the CPG */
+    for (i = 0; i < R9A07G054_NUM_WDT; i++) {
+        SysBusDevice *sbd = SYS_BUS_DEVICE(&s->wdt[i]);
+
+        qdev_prop_set_uint32(DEVICE(sbd), "clock-frequency",
+                             R9A07G054_WDT_CLK_HZ);
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        sysbus_mmio_map(sbd, 0, r9a07g054_wdt_base[i]);
+        sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(gicdev,
+                           R9A07G054_WDT0_SPI + 2 * i));
+        sysbus_connect_irq(sbd, 1, qdev_get_gpio_in(gicdev,
+                           R9A07G054_WDT0_SPI + 2 * i + 1));
+        qdev_connect_gpio_out_named(DEVICE(sbd), "wdtrstb", 0,
+                                    qdev_get_gpio_in_named(DEVICE(&s->cpg),
+                                                           "wdtrstb", i));
+        qdev_connect_gpio_out_named(DEVICE(&s->cpg), "wdt-presetn", i,
+                                    qdev_get_gpio_in_named(DEVICE(sbd),
+                                                           "presetn", 0));
     }
 
     /* Unimplemented blocks */

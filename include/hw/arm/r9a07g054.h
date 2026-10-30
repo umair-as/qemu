@@ -26,6 +26,7 @@
 #include "hw/misc/renesas_rzv2l_cpg.h"
 #include "hw/char/renesas_rz_scifa.h"
 #include "hw/timer/renesas_rz_ostm.h"
+#include "hw/watchdog/renesas_rzg2l_wdt.h"
 #include "hw/intc/renesas_rzg2l_irqc.h"
 #include "hw/gpio/renesas_rzg2l_pfc.h"
 #include "hw/core/sysbus.h"
@@ -43,6 +44,8 @@ enum {
     R9A07G054_NUM_SPIS  = 480,
     R9A07G054_NUM_SCIF  = 5,
     R9A07G054_NUM_OSTM  = 3,
+    /* WDT0, WDT1: Cortex-A55 cores 0 and 1; WDT2: Cortex-M33 */
+    R9A07G054_NUM_WDT   = 3,
 };
 
 struct R9A07G054State {
@@ -56,6 +59,7 @@ struct R9A07G054State {
     RenesasRZV2LCPGState cpg;
     RenesasRZSCIFAState scif[R9A07G054_NUM_SCIF];
     RenesasRZOSTMState ostm[R9A07G054_NUM_OSTM];
+    RenesasRZG2LWDTState wdt[R9A07G054_NUM_WDT];
     RenesasRZG2LIRQCState irqc;
     RenesasRZG2LPFCState pfc;
 };
