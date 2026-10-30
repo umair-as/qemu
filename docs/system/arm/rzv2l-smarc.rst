@@ -70,8 +70,9 @@ SD cards
 (SDHI0), the slot the board boots from in eSD mode; ``index=1`` is the
 slot on the carrier board (SDHI1). A slot without a drive is empty. The
 image size must be a power of two up to 2 GiB, or a multiple of 512 KiB
-above. Linux numbers the cards in probe order unless the device tree has
-``mmc`` aliases.
+above. When the device tree loaded with ``-dtb`` has no ``mmc0`` or
+``mmc1`` alias, the machine adds them for SDHI0 and SDHI1, so Linux
+names the cards ``mmcblk0`` and ``mmcblk1`` in every boot.
 
 .. code-block:: bash
 

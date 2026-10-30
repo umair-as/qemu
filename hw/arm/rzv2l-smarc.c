@@ -83,6 +83,40 @@ static void rzv2l_smarc_set_supply(void *fdt, const char *node,
 }
 
 /*
+ * Without "mmcN" aliases Linux numbers the SD hosts in probe order, and
+ * the two channels probe in parallel, so the card's block device name
+ * changes from boot to boot. Name SDHI0 mmc0 and SDHI1 mmc1 unless the
+ * device tree already gives an alias of that name. This is QEMU's own
+ * edit: the board's vendor U-Boot does not make it.
+ */
+static void rzv2l_smarc_add_mmc_aliases(void *fdt)
+{
+    static const char * const sdhi[] = {
+        "/soc/mmc@11c00000", "/soc/mmc@11c10000",
+    };
+    int aliases, i;
+
+    aliases = fdt_path_offset(fdt, "/aliases");
+    if (aliases < 0) {
+        aliases = fdt_add_subnode(fdt, 0, "aliases");
+    }
+    for (i = 0; i < ARRAY_SIZE(sdhi); i++) {
+        g_autofree char *name = g_strdup_printf("mmc%d", i);
+
+        if (fdt_path_offset(fdt, sdhi[i]) < 0 ||
+            fdt_getprop(fdt, aliases, name, NULL)) {
+            continue;
+        }
+        if (fdt_setprop_string(fdt, aliases, name, sdhi[i]) < 0) {
+            error_report("couldn't add the /aliases/%s property", name);
+            exit(1);
+        }
+        /* Adding a property may move the node */
+        aliases = fdt_path_offset(fdt, "/aliases");
+    }
+}
+
+/*
  * The device-tree edits the board's U-Boot makes before it starts
  * Linux, for a kernel QEMU loads itself. When the boot mode pins
  * select eSD, the U-Boot board code points the SD0 supplies at the
@@ -95,6 +129,7 @@ static void rzv2l_smarc_modify_dtb(const struct arm_boot_info *info,
 {
     RZV2LSmarcState *s = container_of(info, RZV2LSmarcState, boot_info);
 
+    rzv2l_smarc_add_mmc_aliases(fdt);
     if (s->boot_mode == RZV2L_SMARC_BOOT_MODE_ESD) {
         rzv2l_smarc_set_supply(fdt, "/soc/mmc@11c00000", "vmmc-supply",
                                "/regulator-vcc-sdhi0");
