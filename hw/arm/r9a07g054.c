@@ -85,6 +85,12 @@ static const hwaddr r9a07g054_wdt_base[R9A07G054_NUM_WDT] = {
 };
 #define R9A07G054_WDT0_SPI      49
 
+/* SDHIn: OXMNIRQ is SPI 104 + 2n, OXASIOIRQ SPI 105 + 2n (Table 8.2) */
+static const hwaddr r9a07g054_sdhi_base[R9A07G054_NUM_SDHI] = {
+    0x11c00000, 0x11c10000,
+};
+#define R9A07G054_SDHI0_SPI     104
+
 /* WDT counter clock WDTn_CLK (manual section 21.1.1) */
 #define R9A07G054_WDT_CLK_HZ    24000000
 
@@ -119,8 +125,6 @@ static const struct {
     { "riic3",          0x10058c00, 0x400,   false },
     { "usb0-host",      0x11c50000, 0x10000, false },
     { "usb1-host",      0x11c70000, 0x10000, false },
-    { "sdhi0",          0x11c00000, 0x10000, false },
-    { "sdhi1",          0x11c10000, 0x10000, false },
     { "mipi-dsi",       0x10850000, 0x20000, false },
     { "vspd",           0x10870000, 0x10000, false },
     { "fcpvd",          0x10880000, 0x10000, false },
@@ -182,6 +186,14 @@ static void r9a07g054_init(Object *obj)
         g_autofree char *name = g_strdup_printf("wdt%d", i);
 
         object_initialize_child(obj, name, &s->wdt[i], TYPE_RENESAS_RZG2L_WDT);
+    }
+
+    for (i = 0; i < R9A07G054_NUM_SDHI; i++) {
+        g_autofree char *name = g_strdup_printf("sdhi%d", i);
+        g_autofree char *bus = g_strdup_printf("sd-bus%d", i);
+
+        object_initialize_child(obj, name, &s->sdhi[i], TYPE_RENESAS_SDHI);
+        object_property_add_alias(obj, bus, OBJECT(&s->sdhi[i]), "sd-bus");
     }
 }
 
@@ -336,6 +348,27 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
         qdev_connect_gpio_out_named(DEVICE(&s->cpg), "wdt-presetn", i,
                                     qdev_get_gpio_in_named(DEVICE(sbd),
                                                            "presetn", 0));
+    }
+
+    /* SDHI0-1: the built-in DMAC sees the system address space */
+    for (i = 0; i < R9A07G054_NUM_SDHI; i++) {
+        SysBusDevice *sbd = SYS_BUS_DEVICE(&s->sdhi[i]);
+
+        /* SD_STATUS (the SD0_RST# pin) exists on channel 0 only */
+        qdev_prop_set_bit(DEVICE(sbd), "has-sd-status", i == 0);
+        object_property_set_link(OBJECT(sbd), "dma-memory",
+                                 OBJECT(get_system_memory()), &error_abort);
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        sysbus_mmio_map(sbd, 0, r9a07g054_sdhi_base[i]);
+        sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(gicdev,
+                           R9A07G054_SDHI0_SPI + 2 * i));
+        sysbus_connect_irq(sbd, 1, qdev_get_gpio_in(gicdev,
+                           R9A07G054_SDHI0_SPI + 2 * i + 1));
+        qdev_connect_gpio_out_named(DEVICE(&s->cpg), "sdhi-rst", i,
+                                    qdev_get_gpio_in_named(DEVICE(sbd),
+                                                           "ixrst", 0));
     }
 
     /* Unimplemented blocks */

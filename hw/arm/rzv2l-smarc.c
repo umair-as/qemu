@@ -18,6 +18,9 @@
 #include "hw/arm/machines-qom.h"
 #include "hw/core/boards.h"
 #include "hw/core/qdev-properties.h"
+#include "hw/sd/sd.h"
+#include "system/blockdev.h"
+#include "system/block-backend.h"
 #include "system/qtest.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
@@ -100,6 +103,32 @@ static void rzv2l_smarc_modify_dtb(const struct arm_boot_info *info,
     }
 }
 
+/*
+ * The SD cards: -drive if=sd,index=0 goes into the slot on the module
+ * (SDHI0), index=1 into the slot on the carrier board (SDHI1). A slot
+ * without a drive is empty.
+ */
+static void rzv2l_smarc_attach_sd(RZV2LSmarcState *s)
+{
+    int i;
+
+    for (i = 0; i < R9A07G054_NUM_SDHI; i++) {
+        g_autofree char *name = g_strdup_printf("sd-bus%d", i);
+        DriveInfo *di = drive_get(IF_SD, 0, i);
+        DeviceState *card;
+
+        if (!di) {
+            continue;
+        }
+        card = qdev_new(TYPE_SD_CARD);
+        qdev_prop_set_drive_err(card, "drive", blk_by_legacy_dinfo(di),
+                                &error_fatal);
+        qdev_realize_and_unref(card,
+                               qdev_get_child_bus(DEVICE(&s->soc), name),
+                               &error_fatal);
+    }
+}
+
 static void rzv2l_smarc_init(MachineState *machine)
 {
     RZV2LSmarcState *s = RZV2L_SMARC_MACHINE(machine);
@@ -135,6 +164,7 @@ static void rzv2l_smarc_init(MachineState *machine)
     object_property_set_bool(OBJECT(&s->soc), "pfc-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
+    rzv2l_smarc_attach_sd(s);
 
     memory_region_add_subregion(get_system_memory(), R9A07G054_DDR_BASE,
                                 machine->ram);
@@ -180,6 +210,7 @@ static void rzv2l_smarc_machine_class_init(ObjectClass *oc, const void *data)
     mc->valid_cpu_types = valid_cpu_types;
     mc->default_ram_id = "rzv2l-smarc.ram";
     mc->default_ram_size = RZV2L_SMARC_RAM_SIZE;
+    mc->block_default_type = IF_SD;
 
     object_class_property_add(oc, "boot-mode", "uint8",
                               rzv2l_smarc_visit_boot_mode,
