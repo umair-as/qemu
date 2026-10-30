@@ -9,6 +9,13 @@
  * entered at non-secure EL1, with QEMU's PSCI over SMC standing in for
  * TF-A, and is given the memory window that TF-A and U-Boot give Linux
  * on the board: the first 128 MiB of DDR belong to the secure firmware.
+ *
+ * Each Gigabit Ethernet channel has a KSZ9131 PHY on the module, at
+ * MDIO address 7 (its strap pins pull PHYAD[2:0] high); its INT_N pin
+ * drives IRQ2 (ETH0) or IRQ3 (ETH1), and its reset follows the board
+ * reset (RZ/G2L, RZ/V2L SMARC module user's manual, section 4.3). The
+ * first -nic is ETH0, the second ETH1; a channel without one has no
+ * cable.
  */
 
 #include "qemu/osdep.h"
@@ -19,6 +26,8 @@
 #include "hw/core/boards.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/sd/sd.h"
+#include "hw/net/ksz9131_phy.h"
+#include "net/net.h"
 #include "system/blockdev.h"
 #include "system/block-backend.h"
 #include "system/qtest.h"
@@ -36,6 +45,10 @@ OBJECT_DECLARE_SIMPLE_TYPE(RZV2LSmarcState, RZV2L_SMARC_MACHINE)
 #define RZV2L_SMARC_LINUX_MEM_BASE  0x48000000
 #define RZV2L_SMARC_LINUX_MEM_SIZE  0x78000000
 
+/* The PHY address straps, and the IRQn pin INT_N of each PHY drives */
+#define RZV2L_SMARC_PHY_ADDR        7
+static const int rzv2l_smarc_phy_irq[R9A07G054_NUM_ETH] = { 2, 3 };
+
 /* MD_BOOT[2:0] = 0: boot from the SD card on the module (eSD) */
 #define RZV2L_SMARC_BOOT_MODE_ESD   0
 
@@ -43,6 +56,7 @@ struct RZV2LSmarcState {
     MachineState parent_obj;
 
     R9A07G054State soc;
+    KSZ9131PhyState phy[R9A07G054_NUM_ETH];
     struct arm_boot_info boot_info;
 
     /* Board switches, latched by the SoC at power-on */
@@ -117,12 +131,45 @@ static void rzv2l_smarc_add_mmc_aliases(void *fdt)
 }
 
 /*
+ * U-Boot's fdt_fixup_ethernet(): the node each "ethernetN" alias names
+ * gets the MAC address of the channel in "local-mac-address", and in
+ * "mac-address" if it has one. On the board the addresses come from
+ * U-Boot's environment; here from the NICs.
+ */
+static void rzv2l_smarc_set_mac_addresses(RZV2LSmarcState *s, void *fdt)
+{
+    int i;
+
+    for (i = 0; i < R9A07G054_NUM_ETH; i++) {
+        g_autofree char *name = g_strdup_printf("ethernet%d", i);
+        const uint8_t *mac = s->soc.eth[i].conf.macaddr.a;
+        const char *path = fdt_get_alias(fdt, name);
+        int node;
+
+        node = path ? fdt_path_offset(fdt, path) : -1;
+        if (node < 0) {
+            continue;
+        }
+        if (fdt_getprop(fdt, node, "mac-address", NULL) &&
+            fdt_setprop_inplace(fdt, node, "mac-address", mac, 6) < 0) {
+            error_report("couldn't set %s/mac-address", path);
+            exit(1);
+        }
+        if (fdt_setprop(fdt, node, "local-mac-address", mac, 6) < 0) {
+            error_report("couldn't set %s/local-mac-address", path);
+            exit(1);
+        }
+    }
+}
+
+/*
  * The device-tree edits the board's U-Boot makes before it starts
  * Linux, for a kernel QEMU loads itself. When the boot mode pins
  * select eSD, the U-Boot board code points the SD0 supplies at the
  * SD0 regulators. The Linux device trees for the board have no
  * "regulator-vcc-sdhi0" node, so vmmc-supply keeps its value; only
- * vqmmc-supply changes. U-Boot's other edits are not made here.
+ * vqmmc-supply changes. U-Boot sets the MAC addresses of the Ethernet
+ * channels. U-Boot's other edits are not made here.
  */
 static void rzv2l_smarc_modify_dtb(const struct arm_boot_info *info,
                                    void *fdt)
@@ -130,6 +177,7 @@ static void rzv2l_smarc_modify_dtb(const struct arm_boot_info *info,
     RZV2LSmarcState *s = container_of(info, RZV2LSmarcState, boot_info);
 
     rzv2l_smarc_add_mmc_aliases(fdt);
+    rzv2l_smarc_set_mac_addresses(s, fdt);
     if (s->boot_mode == RZV2L_SMARC_BOOT_MODE_ESD) {
         rzv2l_smarc_set_supply(fdt, "/soc/mmc@11c00000", "vmmc-supply",
                                "/regulator-vcc-sdhi0");
@@ -161,6 +209,40 @@ static void rzv2l_smarc_attach_sd(RZV2LSmarcState *s)
         qdev_realize_and_unref(card,
                                qdev_get_child_bus(DEVICE(&s->soc), name),
                                &error_fatal);
+    }
+}
+
+/* The PHYs, and the NICs of the Ethernet channels */
+static void rzv2l_smarc_init_eth(RZV2LSmarcState *s)
+{
+    int i;
+
+    for (i = 0; i < R9A07G054_NUM_ETH; i++) {
+        g_autofree char *name = g_strdup_printf("phy%d", i);
+        DeviceState *eth = DEVICE(&s->soc.eth[i]);
+
+        object_initialize_child(OBJECT(s), name, &s->phy[i],
+                                TYPE_KSZ9131_PHY);
+        sysbus_realize(SYS_BUS_DEVICE(&s->phy[i]), &error_fatal);
+        object_property_set_link(OBJECT(eth), "phy", OBJECT(&s->phy[i]),
+                                 &error_fatal);
+        qdev_prop_set_uint8(eth, "phy-addr", RZV2L_SMARC_PHY_ADDR);
+        qemu_configure_nic_device(eth, true, NULL);
+    }
+}
+
+static void rzv2l_smarc_wire_eth(RZV2LSmarcState *s)
+{
+    int i;
+
+    for (i = 0; i < R9A07G054_NUM_ETH; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->phy[i]), 0,
+                           qdev_get_gpio_in_named(DEVICE(&s->soc.irqc), "irq",
+                                                  rzv2l_smarc_phy_irq[i]));
+        qdev_connect_gpio_out_named(DEVICE(&s->phy[i]), "link", 0,
+                                    qdev_get_gpio_in_named(
+                                        DEVICE(&s->soc.eth[i]),
+                                        "phy-link", 0));
     }
 }
 
@@ -198,7 +280,9 @@ static void rzv2l_smarc_init(MachineState *machine)
                              machine->kernel_filename != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "pfc-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
+    rzv2l_smarc_init_eth(s);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
+    rzv2l_smarc_wire_eth(s);
     rzv2l_smarc_attach_sd(s);
 
     memory_region_add_subregion(get_system_memory(), R9A07G054_DDR_BASE,

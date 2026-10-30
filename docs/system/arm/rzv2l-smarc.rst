@@ -23,8 +23,9 @@ Supported devices
  * OS timers OSTM0-2
  * Pin function controller: the pin registers, without electrical
    effect
- * Interrupt control unit (IA55): the registers only, no interrupt
-   routing
+ * Interrupt control unit (IA55): the registers, and the IRQ0-7 pin
+   interrupts to the GIC (level and edge detection); the NMI and the
+   GPIO interrupts TINT0-31 are not routed
  * Watchdog timers WDT0-2. A watchdog reset request resets the system
    when the CPG's ``CPG_WDTRST_SEL`` allows it; ``-action watchdog=``
    selects what a reset does.
@@ -32,11 +33,18 @@ Supported devices
    controllers, for SD memory cards. Transfers complete at once, so the
    data timeout never fires; SDIO, HPI and the sampling clock controller
    (bus tuning) are not modelled.
+ * Gigabit Ethernet interfaces ETH0 and ETH1, each with its Microchip
+   KSZ9131 PHY at MDIO address 7, whose interrupt reaches the GIC through
+   IRQ2 (ETH0) and IRQ3 (ETH1) of the IA55: the descriptor DMA
+   controller, the MAC with the MDIO pin interface, and the TCP/IP
+   checksum offload. Transfers complete at once. Flow control, the
+   hardware MDIO controller, energy-efficient Ethernet, the receive
+   filters, wake-up and ARP offload are not modelled.
 
 Missing devices
 ---------------
 
-Ethernet, I2C, USB, the QSPI controller, the display, CAN-FD,
+I2C, USB, the QSPI controller, the display, CAN-FD,
 the ADC, the thermal sensor and the DMA controller are stubs: they log
 every access and read as zero, so their drivers fail when they probe.
 Every other on-chip block is missing. The serial ports have no modem
@@ -78,6 +86,20 @@ names the cards ``mmcblk0`` and ``mmcblk1`` in every boot.
 
   $ qemu-system-aarch64 -M rzv2l-smarc ... \
       -drive if=sd,index=0,format=raw,file=sd.img
+
+Networking
+----------
+
+The first ``-nic`` (or ``-net nic``) is ETH0, the second ETH1. A channel
+without a network backend has no cable: its PHY reports the link down.
+``set_link`` on the backend unplugs and plugs the cable. When a kernel
+is loaded with ``-kernel``, the machine writes each channel's MAC
+address into the ``local-mac-address`` property of the node the
+``ethernet0`` and ``ethernet1`` aliases name, as the board's U-Boot does.
+
+.. code-block:: bash
+
+  $ qemu-system-aarch64 -M rzv2l-smarc ... -nic user
 
 Boot options
 ------------

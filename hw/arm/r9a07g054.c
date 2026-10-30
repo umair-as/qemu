@@ -91,6 +91,15 @@ static const hwaddr r9a07g054_sdhi_base[R9A07G054_NUM_SDHI] = {
 };
 #define R9A07G054_SDHI0_SPI     104
 
+/* ETHn: pif_int_n, int_fil_n, int_arp_ns_n are SPI 84-86 + 3n (Table 8.2) */
+static const hwaddr r9a07g054_eth_base[R9A07G054_NUM_ETH] = {
+    0x11c20000, 0x11c30000,
+};
+#define R9A07G054_ETH0_SPI      84
+
+/* IRQ0-7 are SPI 1-8 (Table 8.2) */
+#define R9A07G054_IRQ0_SPI      1
+
 /* WDT counter clock WDTn_CLK (manual section 21.1.1) */
 #define R9A07G054_WDT_CLK_HZ    24000000
 
@@ -118,8 +127,6 @@ static const struct {
     { "rz-dmac-ext",    0x11830000, 0x10000, true },
     { "usbphy-ctrl",    0x11c40000, 0x10000, true },
     { "tsu",            0x10059400, 0x400,   false },
-    { "ravb-eth0",      0x11c20000, 0x10000, false },
-    { "ravb-eth1",      0x11c30000, 0x10000, false },
     { "riic0",          0x10058000, 0x400,   false },
     { "riic1",          0x10058400, 0x400,   false },
     { "riic3",          0x10058c00, 0x400,   false },
@@ -194,6 +201,12 @@ static void r9a07g054_init(Object *obj)
 
         object_initialize_child(obj, name, &s->sdhi[i], TYPE_RENESAS_SDHI);
         object_property_add_alias(obj, bus, OBJECT(&s->sdhi[i]), "sd-bus");
+    }
+
+    for (i = 0; i < R9A07G054_NUM_ETH; i++) {
+        g_autofree char *name = g_strdup_printf("eth%d", i);
+
+        object_initialize_child(obj, name, &s->eth[i], TYPE_RENESAS_GBETH);
     }
 }
 
@@ -307,12 +320,16 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->pfc), 0,
                     r9a07g054_memmap[R9A07G054_PFC]);
 
-    /* IRQC (IA55): registers only, no interrupt routing yet */
+    /* IRQC (IA55): IRQ0-7 to the GIC; NMI and TINT0-31 not routed */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->irqc), errp)) {
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->irqc), 0,
                     r9a07g054_memmap[R9A07G054_IRQC]);
+    for (i = 0; i < RENESAS_RZG2L_IRQC_NUM_IRQ; i++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->irqc), i,
+                           qdev_get_gpio_in(gicdev, R9A07G054_IRQ0_SPI + i));
+    }
 
     /* OSTM0-2 */
     for (i = 0; i < R9A07G054_NUM_OSTM; i++) {
@@ -377,6 +394,26 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
         qdev_connect_gpio_out_named(DEVICE(&s->cpg), "sdhi-rst", i,
                                     qdev_get_gpio_in_named(DEVICE(sbd),
                                                            "ixrst", 0));
+    }
+
+    /* ETH0-1: the DMAC sees the system address space */
+    for (i = 0; i < R9A07G054_NUM_ETH; i++) {
+        SysBusDevice *sbd = SYS_BUS_DEVICE(&s->eth[i]);
+        int j;
+
+        object_property_set_link(OBJECT(sbd), "dma-memory",
+                                 OBJECT(get_system_memory()), &error_abort);
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        sysbus_mmio_map(sbd, 0, r9a07g054_eth_base[i]);
+        for (j = 0; j < RENESAS_GBETH_NUM_IRQ; j++) {
+            sysbus_connect_irq(sbd, j, qdev_get_gpio_in(gicdev,
+                               R9A07G054_ETH0_SPI + 3 * i + j));
+        }
+        qdev_connect_gpio_out_named(DEVICE(&s->cpg), "eth-rst", i,
+                                    qdev_get_gpio_in_named(DEVICE(sbd),
+                                                           "reset", 0));
     }
 
     /* Unimplemented blocks */
