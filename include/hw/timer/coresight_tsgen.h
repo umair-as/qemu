@@ -6,6 +6,9 @@
 
 /*
  * QEMU interface:
+ *  + QOM property "direct-boot": start with the counter enabled, as boot
+ *    firmware leaves it, for a kernel that is loaded directly
+ *  + QOM property "direct-boot-freq": CNTFID0 in that start state (Hz)
  *  + sysbus MMIO region 0: the control frame (CNTCR, CNTSR, CNTFID0)
  *    and the read frame, 4 KiB each
  */
@@ -30,6 +33,10 @@ struct CoreSightTSGenState {
 
     uint32_t cntcr;
     uint32_t cntfid0;
+
+    /* Properties */
+    bool direct_boot;
+    uint32_t direct_boot_freq;
 };
 
 #endif
