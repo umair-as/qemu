@@ -22,6 +22,9 @@
  *    Gigabit Ethernet channel n in reset
  *  + named GPIO inputs "wdtrstb" 0-2: the reset request of watchdog
  *    channel n, active high
+ *  + named GPIO outputs "ca55-run" 0-1: set when Cortex-A55 core n is
+ *    to start from its reset vector, cleared when it is to stop; changes
+ *    only, not set at reset (core 0 runs, core 1 is off)
  */
 
 #ifndef HW_MISC_RENESAS_RZV2L_CPG_H
@@ -36,11 +39,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZV2LCPGState, RENESAS_RZV2L_CPG)
 #define RENESAS_RZV2L_CPG_MMIO_SIZE 0x10000
 
 /* Number of registers in the model's register table */
-#define RENESAS_RZV2L_CPG_NUM_REGS 191
+#define RENESAS_RZV2L_CPG_NUM_REGS 195
 
 #define RENESAS_RZV2L_CPG_NUM_WDT 3
 #define RENESAS_RZV2L_CPG_NUM_SDHI 2
 #define RENESAS_RZV2L_CPG_NUM_ETH 2
+#define RENESAS_RZV2L_CPG_NUM_CA55 2
 
 struct RenesasRZV2LCPGState {
     /*< private >*/
@@ -57,6 +61,10 @@ struct RenesasRZV2LCPGState {
     qemu_irq wdt_presetn[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq sdhi_rst[RENESAS_RZV2L_CPG_NUM_SDHI];
     qemu_irq eth_rst[RENESAS_RZV2L_CPG_NUM_ETH];
+    /* Cortex-A55 cores: P-Channel mode ON, and running */
+    bool ca55_on[RENESAS_RZV2L_CPG_NUM_CA55];
+    bool ca55_run[RENESAS_RZV2L_CPG_NUM_CA55];
+    qemu_irq ca55_run_out[RENESAS_RZV2L_CPG_NUM_CA55];
 
     /* Properties */
     bool direct_boot;
