@@ -66,5 +66,8 @@ config STELLARIS_GPTM
 config AVR_TIMER16
     bool
 
+config CORESIGHT_TSGEN
+    bool
+
 config RENESAS_RZ_OSTM
     bool

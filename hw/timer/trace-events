@@ -132,3 +132,7 @@ imx_epit_cmp(uint32_t sr) "sr was %d"
 # renesas_rz_ostm.c
 renesas_rz_ostm_read(uint64_t offset, uint64_t data, unsigned size) "offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
 renesas_rz_ostm_write(uint64_t offset, uint64_t data, unsigned size) "offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
+
+# coresight_tsgen.c
+coresight_tsgen_read(uint64_t offset, uint64_t value, unsigned size) "offset 0x%" PRIx64 " value 0x%" PRIx64 " size %u"
+coresight_tsgen_write(uint64_t offset, uint64_t value, unsigned size) "offset 0x%" PRIx64 " value 0x%" PRIx64 " size %u"
