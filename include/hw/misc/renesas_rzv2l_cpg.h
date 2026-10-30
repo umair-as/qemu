@@ -18,6 +18,8 @@
  *    watchdog channel n in reset
  *  + named GPIO outputs "sdhi-rst" 0-1: high while CPG_RST_SDHI holds
  *    SDHI channel n in reset (its IXRST line is low)
+ *  + named GPIO outputs "eth-rst" 0-1: high while CPG_RST_ETH holds
+ *    Gigabit Ethernet channel n in reset
  *  + named GPIO inputs "wdtrstb" 0-2: the reset request of watchdog
  *    channel n, active high
  */
@@ -38,6 +40,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZV2LCPGState, RENESAS_RZV2L_CPG)
 
 #define RENESAS_RZV2L_CPG_NUM_WDT 3
 #define RENESAS_RZV2L_CPG_NUM_SDHI 2
+#define RENESAS_RZV2L_CPG_NUM_ETH 2
 
 struct RenesasRZV2LCPGState {
     /*< private >*/
@@ -53,6 +56,7 @@ struct RenesasRZV2LCPGState {
     bool wdtrstb[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq wdt_presetn[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq sdhi_rst[RENESAS_RZV2L_CPG_NUM_SDHI];
+    qemu_irq eth_rst[RENESAS_RZV2L_CPG_NUM_ETH];
 
     /* Properties */
     bool direct_boot;
