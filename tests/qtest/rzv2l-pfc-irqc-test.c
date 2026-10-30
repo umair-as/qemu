@@ -141,9 +141,11 @@ static void test_pfc_pwpr(void)
 }
 
 /*
- * Port data and mode (sections 41.3.1-41.3.5): a 3-pin port keeps only
- * its pins' bits; PIN reflects Pn for pins in output mode with input
- * enabled (PMn = 11b); PM is 2 bits per pin.
+ * Port data and mode (sections 41.3.1-41.3.4, Table 41.1): a 3-pin port
+ * keeps only its pins' bits; PM is 2 bits per pin. PIN reflects Pn for
+ * pins in output mode with input enabled (PMn = 11b): the model's
+ * assumption that no pin is driven from outside, not a manual value
+ * (section 41.3.5 says only "input value of the pin").
  */
 static void test_pfc_port(void)
 {
@@ -169,7 +171,10 @@ static void test_pfc_port(void)
     qtest_writel(qts, IEN(4), 0xffffffff);
     g_assert_cmphex(qtest_readl(qts, IEN(4)), ==, 0x00000101);
 
-    /* An offset with no register reads 0 (EVK R71: +0x3100) */
+    /*
+     * An offset with no register reads 0 (EVK R71: +0x3100); that the
+     * write is ignored is an assumption (R71 was a read only).
+     */
     qtest_writel(qts, PFC + 0x3100, 0xffffffff);
     g_assert_cmphex(qtest_readl(qts, PFC + 0x3100), ==, 0);
     qtest_quit(qts);

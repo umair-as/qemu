@@ -12,17 +12,19 @@
  * pin correspondence tables (Tables 41.1-41.13).
  *
  * - An access is split into bytes. A byte of a register follows that
- *   register's implemented bits; a byte with no register reads 0 and
- *   ignores writes, as an EVK read of an undefined offset shows. Such
- *   bytes, and access sizes the manual does not list for a register,
- *   are logged.
+ *   register's implemented bits; a byte with no register reads 0, as an
+ *   EVK read of an undefined offset shows. That it ignores writes, and
+ *   the split of a wider access into bytes, are assumptions: the EVK
+ *   read is one 32-bit read. Such bytes, and access sizes the manual
+ *   does not list for a register, are logged.
  * - PWPR (section 41.3.10): the PFC registers take writes only while
  *   PFCWE (bit 6) is 1, and PFCWE changes only while B0WI (bit 7) was 0
  *   before the write. The manual gives PWPR as 8-bit; Linux and TF-A
  *   write it with 32-bit stores, so the model accepts both.
  * - PINn reads the output data Pn for pins in output mode with input
- *   enabled (PMn = 11b) and 0 for the others: no pin is driven from
- *   outside.
+ *   enabled (PMn = 11b) and 0 for the others. This is an assumption
+ *   (no pin is driven from outside): section 41.3.5 says only that PINn
+ *   gives the input value of the pin.
  *
  * Not modelled: the electrical settings (drive, slew, pull, noise
  * filters, IO voltage) and the GPIO interrupt routing (ISEL) are only
