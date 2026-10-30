@@ -13,21 +13,26 @@
  * descriptor base address table at DBAT (entry q at DBAT + 8 * q).
  * - CCC.OPC selects RESET, CONFIG or OPERATION; CSR.OPS = 1 << OPC.
  *   Entering OPERATION loads the current descriptor addresses from the
- *   table; leaving it clears the status flags, and CONFIG mode returns
- *   all status registers to their reset values (section 30.5.1.1).
+ *   table; leaving it clears them and the status flags, and CONFIG mode
+ *   returns all status registers to their reset values (section 30.4.1.5,
+ *   30.5.1.1).
  * - Transmission runs on a TCCR.TSRQ0 write, at once, until the queue
- *   reaches a descriptor the software owns (FEMPTY, LEMPTY, EEMPTY) or
- *   an EOS (Table 30.14); TSRQ0 then reads 0. FSTART/FMID/FEND/FSINGLE
- *   descriptors are written back as FEMPTY, LINK as LEMPTY, EOS as
- *   EEMPTY; LINKFIX is followed and not written back. A frame is sent
- *   when its last descriptor has been read; TIS.FTF0 is set.
+ *   reaches a descriptor the software owns (FEMPTY, LEMPTY, EEMPTY), where
+ *   the next request starts again, or an EOS, after which it starts at
+ *   the next descriptor (Table 30.14); TSRQ0 then reads 0.
+ *   FSTART/FMID/FEND/FSINGLE descriptors are written back as FEMPTY,
+ *   LINK as LEMPTY, EOS as EEMPTY; LINKFIX is followed and not written
+ *   back. A frame is sent when its last descriptor has been read;
+ *   TIS.FTF0 is set.
  * - Reception stores each frame into FEMPTY descriptors, split over as
  *   many as DS requires (FSINGLE, or FSTART/FMID/FEND), with the frame
  *   length or the descriptor's part of it in DS and MSC (Tables 30.12,
  *   30.13). FEMPTY_ND descriptors receive DS = 0 and no data. RIS0.FRF0
  *   is set per stored frame. A frame that finds a descriptor the
  *   software owns is discarded, with RIS2.QFF0; the queue retries the
- *   same descriptor with the next frame.
+ *   same descriptor with the next frame. EI is set only when storing the
+ *   data fails: that descriptor is written back and the queue moves on
+ *   (section 30.5.5.4).
  * - Descriptor types the manual reserves, or a type the queue does not
  *   process (FEMPTY_ND on transmission), stop the queue at that
  *   descriptor: EIS.QEF, ESR.ET = 2 (section 30.5.5.3). A failed bus
@@ -39,7 +44,8 @@
  * - pif_int_n is the OR of the ISS summary bits (section 30.4.1.43):
  *   each enabled DMAC flag, EIS.QFS, and the E-MAC flags in CXR21
  *   enabled in CXR22. CIE gates the descriptor-processed flags of
- *   RIS3 and TIS (Table 30.20). int_fil_n and int_arp_ns_n, the TOE
+ *   RIS3 and TIS in pif_int_n, not in ISS (Table 30.20, section
+ *   30.4.1.42). int_fil_n and int_arp_ns_n, the TOE
  *   filter and ARP/NS outputs, stay inactive.
  *
  * E-MAC (section 30.4.2):
@@ -56,7 +62,9 @@
  *   MDC reaches the PHY at "phy-addr"; a read frame for another
  *   address, and a clause 45 frame, get no answer (MDI reads 1).
  * - The frame counters read 0, except CXR57 (multicast frames
- *   received); they clear on a write, or on a read with CXR20.TRCCM.
+ *   received; broadcast frames are not counted, nor marked in MSC bit 7,
+ *   as the manual names them apart, an inference); they clear on a
+ *   write, or on a read with CXR20.TRCCM.
  *
  * TOE (section 30.5.6): with CSR0.TPE, the IPv4 header checksum and the
  * TCP/UDP/ICMP checksums of IPv4 and IPv6 frames that CSR1 enables are
@@ -99,7 +107,7 @@
 /* DMAC (Table 30.4) */
 #define A_CCC           0x000
 #define   CCC_OPC_MASK      0x3
-#define   CCC_RW            0x02340303
+#define   CCC_RW            0x02040303  /* BOC: the CPU writes only 0 */
 #define A_DBAT          0x004
 #define A_DLR           0x008
 #define   DLR_RESET         0x003fffff
@@ -287,16 +295,21 @@ static unsigned gbeth_opc(RenesasGbEthState *s)
     return s->ccc & CCC_OPC_MASK;
 }
 
-static uint32_t gbeth_iss(RenesasGbEthState *s)
+/*
+ * ISS (section 30.4.1.43). With @output, the terms of pif_int_n: CIE
+ * gates the descriptor-processed flags of RIS3 and TIS there, and has
+ * no influence on ISS itself (section 30.4.1.42, Table 30.20).
+ */
+static uint32_t gbeth_iss(RenesasGbEthState *s, bool output)
 {
     uint32_t iss = 0;
     uint32_t tis = s->tis & s->tic;
     uint32_t ris3 = s->ris3 & s->ric3;
 
-    if (!(s->cie & CIE_CTIE)) {
+    if (output && !(s->cie & CIE_CTIE)) {
         tis &= ~TIS_TDPF;
     }
-    if (!(s->cie & CIE_CRIE)) {
+    if (output && !(s->cie & CIE_CRIE)) {
         ris3 &= ~RIS3_RDPF;
     }
     if ((s->ris0 & s->ric0 & RIS0_FRF0) || ris3) {
@@ -329,7 +342,7 @@ static void gbeth_update_irq(RenesasGbEthState *s)
     } else {
         s->eis &= ~EIS_QFS;
     }
-    qemu_set_irq(s->irq[0], gbeth_iss(s) != 0);
+    qemu_set_irq(s->irq[0], gbeth_iss(s, true) != 0);
 }
 
 /* Record a queue error (ESR, EIS.QEF), section 30.4.1.6 */
@@ -671,9 +684,11 @@ static void gbeth_tx(RenesasGbEthState *s)
             s->cdar_tx = dptr;
             break;
         case DT_EOS:
+            /* A stop point: the next request starts at the next one */
             if (gbeth_write_w0(s, QUEUE_TX, addr,
                                gbeth_set_dt(w0, DT_EEMPTY))) {
                 gbeth_desc_done(s, QUEUE_TX, die);
+                s->cdar_tx += 8;
             }
             goto stop;
         case DT_FEMPTY:
@@ -756,7 +771,8 @@ static ssize_t gbeth_receive(NetClientState *nc, const uint8_t *data,
         }
         len += 4;
     }
-    if (data[0] & 1) {
+    /* Multicast, not broadcast: the manual counts them apart (I) */
+    if ((data[0] & 1) && !is_broadcast_ether_addr(data)) {
         msc |= MSC_MC;
         s->mc_count++;
     }
@@ -783,7 +799,17 @@ static ssize_t gbeth_receive(NetClientState *nc, const uint8_t *data,
             if (dt == DT_FEMPTY && part &&
                 dma_memory_write(&s->dma_as, dptr, frame + done, part,
                                  MEMTXATTRS_UNSPECIFIED) != MEMTX_OK) {
+                /*
+                 * Section 30.5.5.4: the descriptor is written back with
+                 * EI and CDAR moves on; the frame is lost
+                 */
                 gbeth_queue_error(s, QUEUE_RX, ESR_ET_WR_DATA, dptr);
+                w0 = ((start ? DT_FSINGLE : DT_FEND) << 28) | (die << 24) |
+                     (msc << 16) | DESC_EI;
+                if (gbeth_write_w0(s, QUEUE_RX, addr, w0)) {
+                    s->cdar_rx += 8;
+                }
+                gbeth_update_irq(s);
                 return size;
             }
             done += part;
@@ -794,7 +820,6 @@ static ssize_t gbeth_receive(NetClientState *nc, const uint8_t *data,
             }
             start = false;
             w0 = (wdt << 28) | (die << 24) | (msc << 16) |
-                 (done == len ? DESC_EI : 0) |
                  (dt == DT_FEMPTY ? part : 0);
             if (!gbeth_write_w0(s, QUEUE_RX, addr, w0)) {
                 return size;
@@ -892,6 +917,10 @@ static void gbeth_write_ccc(RenesasGbEthState *s, uint32_t val)
     trace_renesas_gbeth_opmode(old, opc);
     if (old == OPC_OPERATION || opc == OPC_CONFIG) {
         gbeth_clear_status(s);
+    }
+    if (old == OPC_OPERATION) {
+        s->cdar_tx = 0;
+        s->cdar_rx = 0;
     }
     if (opc == OPC_OPERATION) {
         s->cdar_tx = s->dbat + 8 * QUEUE_TX;
@@ -1078,7 +1107,7 @@ static MemTxResult gbeth_read(void *opaque, hwaddr offset, uint64_t *data,
         v = s->tis;
         break;
     case A_ISS:
-        v = gbeth_iss(s);
+        v = gbeth_iss(s, false);
         break;
     case A_CIE:
         v = s->cie;
@@ -1347,7 +1376,7 @@ static MemTxResult gbeth_write(void *opaque, hwaddr offset, uint64_t value,
         s->pipr = v & 1;
         break;
     case A_CXR31:
-        s->cxr31 = v & 0x9;
+        s->cxr31 = v & 0xf;
         gbeth_update_link(s);
         break;
     case A_CXR35:
@@ -1476,6 +1505,9 @@ static void gbeth_reset_in(void *opaque, int n, int level)
     if (s->in_reset) {
         gbeth_reset_regs(s);
         gbeth_update_irq(s);
+    } else {
+        /* The PHY may have changed the link while the reset was held */
+        s->link = gbeth_link_selected(s);
     }
 }
 
