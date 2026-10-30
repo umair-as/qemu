@@ -41,10 +41,18 @@
  *   Only power-on clears the flag (the model's reading). The cold
  *   reset and WDTOVFOUT pin selections (bits 10:8, 6:4) are stored
  *   only.
+ * - The Cortex-A55 cores (sections 2.2, 7.2.4.186 to 7.2.4.189): each
+ *   core's P-Channel accepts every power mode request at once
+ *   (CPG_COREn_PCHMON.PACCEPT follows CPG_COREn_PCHCTL.PREQ, PDENY reads
+ *   0) and takes the requested mode, ON or OFF. A core runs while its
+ *   P-Channel is ON and CPG_RST_CA55 releases both its reset terminals,
+ *   CA55_RST1_n and CA55_RST3_n (bits n and n + 2); named GPIO output
+ *   "ca55-run" n changes when that does. After a power-on reset core 0
+ *   runs and core 1 is off until software starts it (section 2.2.1).
  * Nothing else in the SoC sees the clock, reset or module-stop state.
  * The PLL monitors, PLL4, PLL6, PLL5 output settings and the Cortex-A55
- * power handshake are not modelled, nor are offsets the manual does not
- * list. Accesses to them fail with a decode error.
+ * cluster P-Channel are not modelled, nor are offsets the manual does
+ * not list. Accesses to them fail with a decode error.
  */
 
 #include "qemu/osdep.h"
@@ -68,6 +76,7 @@ typedef enum {
     CPG_CLKMON,     /* computed from the CPG_CLKON_x 0x180 below */
     CPG_RSTMON,     /* computed from the CPG_RST_x 0x180 below */
     CPG_WDTOVF,     /* CPG_WDTOVF_RST: kept across system resets */
+    CPG_PCHMON,     /* computed from the CPG_COREn_PCHCTL 4 above */
 } CPGRegKind;
 
 typedef struct {
@@ -270,6 +279,10 @@ static const CPGReg cpg_regs[] = {
     CPG_MON(0xa68, RSTMON_DRP, 0),
     { .offset = 0xb10, .kind = CPG_WDTOVF, .name = "WDTOVF_RST" },
     CPG_RW(0xb14, WDTRST_SEL, 0x00000088, 0x00000777),
+    { .offset = 0xb38, .kind = CPG_PCHMON, .name = "CORE0_PCHMON" },
+    CPG_RW(0xb3c, CORE0_PCHCTL, 0x00080000, 0x003f0001),
+    { .offset = 0xb40, .kind = CPG_PCHMON, .name = "CORE1_PCHMON" },
+    CPG_RW(0xb44, CORE1_PCHCTL, 0x00080000, 0x003f0001),
     CPG_WE(0xb60, BUS_ACPU_MSTOP, 0x00000000, 0x0001, 0x0001),
     CPG_WE(0xb64, BUS_MCPU1_MSTOP, 0x00000000, 0xfff7, 0xffff),
     CPG_WE(0xb68, BUS_MCPU2_MSTOP, 0x00000000, 0xffff, 0xffff),
@@ -336,10 +349,18 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
     return &cpg_regs[*idx];
 }
 
+#define CPG_RST_CA55        0x800
 #define CPG_RST_WDT         0x848
 #define CPG_RST_SDHI        0x854
 #define CPG_WDTRST_SEL      0xb14
 #define CPG_WDTOVF_MASK     0x7
+#define CPG_CORE0_PCHCTL    0xb3c
+#define CPG_CORE1_PCHCTL    0xb44
+#define CPG_PCHCTL_PREQ     BIT(0)
+#define CPG_PCHCTL_PSTATE(v)    extract32(v, 16, 6)
+#define CPG_PSTATE_ON       0x08
+#define CPG_PSTATE_OFF_EMU  0x01
+#define CPG_PSTATE_OFF      0x00
 
 /*
  * Channel @n requests a reset: WDTRSTB is a level, so a request that was
@@ -376,6 +397,43 @@ static void rzv2l_cpg_update_sdhi(RenesasRZV2LCPGState *s)
     for (n = 0; n < RENESAS_RZV2L_CPG_NUM_SDHI; n++) {
         qemu_set_irq(s->sdhi_rst[n], !(rst & BIT(n)));
     }
+}
+
+/* A Cortex-A55 core runs while its P-Channel is ON and its resets released */
+static void rzv2l_cpg_update_ca55(RenesasRZV2LCPGState *s)
+{
+    uint32_t rst = s->regs[cpg_index[CPG_RST_CA55 / 4]];
+    bool run;
+    int n;
+
+    for (n = 0; n < RENESAS_RZV2L_CPG_NUM_CA55; n++) {
+        run = s->ca55_on[n] && (rst & BIT(n)) && (rst & BIT(n + 2));
+        if (run != s->ca55_run[n]) {
+            s->ca55_run[n] = run;
+            trace_renesas_rzv2l_cpg_ca55_run(n, run);
+            qemu_set_irq(s->ca55_run_out[n], run);
+        }
+    }
+}
+
+/* A P-Channel request (PREQ rising) is accepted and takes its mode */
+static void rzv2l_cpg_pchannel(RenesasRZV2LCPGState *s, int n, uint32_t ctl)
+{
+    switch (CPG_PCHCTL_PSTATE(ctl)) {
+    case CPG_PSTATE_ON:
+        s->ca55_on[n] = true;
+        break;
+    case CPG_PSTATE_OFF:
+    case CPG_PSTATE_OFF_EMU:
+        s->ca55_on[n] = false;
+        break;
+    default:
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "%s: core %d: unsupported power mode 0x%x\n",
+                      __func__, n, CPG_PCHCTL_PSTATE(ctl));
+        return;
+    }
+    rzv2l_cpg_update_ca55(s);
 }
 
 /* The bits a write changes: each enabled field, as wide as it is */
@@ -435,6 +493,10 @@ static MemTxResult rzv2l_cpg_read(void *opaque, hwaddr offset,
     case CPG_WDTOVF:
         value = s->wdtovf;
         break;
+    case CPG_PCHMON:
+        /* PACCEPT follows PREQ; nothing is ever denied */
+        value = s->regs[cpg_index[(offset + 4) / 4]] & CPG_PCHCTL_PREQ;
+        break;
     default:
         value = s->regs[idx];
         break;
@@ -483,7 +545,12 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
     }
     old = s->regs[idx];
     s->regs[idx] = (s->regs[idx] & ~mask) | (data & mask);
-    if (offset == CPG_RST_WDT) {
+    if (offset == CPG_RST_CA55) {
+        rzv2l_cpg_update_ca55(s);
+    } else if ((offset == CPG_CORE0_PCHCTL || offset == CPG_CORE1_PCHCTL) &&
+               (s->regs[idx] & ~old & CPG_PCHCTL_PREQ)) {
+        rzv2l_cpg_pchannel(s, offset == CPG_CORE1_PCHCTL, s->regs[idx]);
+    } else if (offset == CPG_RST_WDT) {
         rzv2l_cpg_update_wdt(s);
     } else if (offset == CPG_RST_SDHI) {
         rzv2l_cpg_update_sdhi(s);
@@ -516,6 +583,10 @@ static void rzv2l_cpg_reset_hold(Object *obj, ResetType type)
     for (i = 0; i < ARRAY_SIZE(cpg_regs); i++) {
         s->regs[i] = (cpg_regs[i].kind == CPG_PLAIN ||
                       cpg_regs[i].kind == CPG_WEN) ? cpg_regs[i].reset : 0;
+    }
+    /* Out of a power-on reset only core 0 runs; no change is signalled */
+    for (i = 0; i < RENESAS_RZV2L_CPG_NUM_CA55; i++) {
+        s->ca55_on[i] = s->ca55_run[i] = (i == 0);
     }
     if (s->direct_boot) {
         for (i = 0; i < ARRAY_SIZE(cpg_post_firmware); i++) {
@@ -559,18 +630,24 @@ static void rzv2l_cpg_init(Object *obj)
                              RENESAS_RZV2L_CPG_NUM_SDHI);
     qdev_init_gpio_in_named(DEVICE(obj), rzv2l_cpg_wdtrstb, "wdtrstb",
                             RENESAS_RZV2L_CPG_NUM_WDT);
+    qdev_init_gpio_out_named(DEVICE(obj), s->ca55_run_out, "ca55-run",
+                             RENESAS_RZV2L_CPG_NUM_CA55);
 }
 
 static const VMStateDescription vmstate_rzv2l_cpg = {
     .name = TYPE_RENESAS_RZV2L_CPG,
-    .version_id = 2,
-    .minimum_version_id = 2,
+    .version_id = 3,
+    .minimum_version_id = 3,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, RenesasRZV2LCPGState,
                              RENESAS_RZV2L_CPG_NUM_REGS),
         VMSTATE_UINT32(wdtovf, RenesasRZV2LCPGState),
         VMSTATE_BOOL_ARRAY(wdtrstb, RenesasRZV2LCPGState,
                            RENESAS_RZV2L_CPG_NUM_WDT),
+        VMSTATE_BOOL_ARRAY(ca55_on, RenesasRZV2LCPGState,
+                           RENESAS_RZV2L_CPG_NUM_CA55),
+        VMSTATE_BOOL_ARRAY(ca55_run, RenesasRZV2LCPGState,
+                           RENESAS_RZV2L_CPG_NUM_CA55),
         VMSTATE_END_OF_LIST()
     }
 };
