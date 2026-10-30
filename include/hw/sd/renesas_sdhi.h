@@ -11,6 +11,10 @@
  *
  * QEMU interface:
  *  + QOM property "has-sd-status": the channel has SD_STATUS (channel 0)
+ *  + QOM properties "cd-connected", "wp-connected": the board routes the
+ *    card slot's card detect / write protect switch to the ISDCD / ISDWP
+ *    input (default on); an unrouted input stays high, as the manual
+ *    asks for unused SDx_CD and SDx_WP pins
  *  + QOM link "dma-memory": the memory the built-in DMAC reads and writes
  *  + sysbus MMIO region 0: the channel's registers (64 KiB)
  *  + sysbus IRQ 0: OXMNIRQ, card access, card detect and DMAC interrupts
@@ -99,6 +103,8 @@ struct RenesasSDHIState {
 
     /* Properties */
     bool has_sd_status;
+    bool cd_connected;
+    bool wp_connected;
 };
 
 #endif

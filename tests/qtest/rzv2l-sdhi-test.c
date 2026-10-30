@@ -69,6 +69,7 @@
 #define INFO2               (1u << 2)   /* access end */
 #define INFO5               (1u << 5)   /* card detect pin */
 #define INFO7               (1u << 7)   /* write protect pin: 1 = writable */
+#define INFO10              (1u << 10)  /* SDDAT3: 1 = a card pulls it up */
 #define ERR6                (1u << 6)   /* response timeout */
 #define BRE                 (1u << 8)
 #define BWE                 (1u << 9)
@@ -273,6 +274,23 @@ static void test_no_card(void)
     qtest_quit(qts);
 }
 
+/* SDHI1: the carrier slot's SD1_CD is routed, SD1_WP is not (UM p.20) */
+static void test_card_pins_sdhi1(void)
+{
+    g_autofree char *img = make_card();
+    QTestState *qts = qtest_initf("-machine rzv2l-smarc "
+                                  "-drive if=sd,index=1,format=raw,file=%s",
+                                  img);
+    uint32_t b = SDHI1_BASE;
+
+    sdhi_release(qts, b);
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & (INFO5 | INFO7 | INFO10), ==,
+                    INFO5 | INFO10);
+    card_init(qts, b);
+    qtest_quit(qts);
+    unlink(img);
+}
+
 /* SOFT_RST.SDRST = 0 resets the registers marked so in section 40.2 */
 static void test_soft_reset(void)
 {
@@ -305,7 +323,13 @@ static void test_pio(void)
     int i;
 
     sdhi_release(qts, b);
-    g_assert_cmphex(rd(qts, b, SD_INFO1) & (INFO5 | INFO7), ==, INFO5 | INFO7);
+    /*
+     * The EVK with a card in the SDHI0 slot reads INFO10 = 1 and INFO5 =
+     * INFO7 = 0: the module routes neither SD0_CD (in this pin mux) nor
+     * SD0_WP to the SDHI (EVK-R75; module UM Table 4.1 p.20, p.25).
+     */
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & (INFO5 | INFO7 | INFO10), ==,
+                    INFO10);
     card_init(qts, b);
 
     cmd(qts, b, CMD_R1 | CMD_DATA | CMD_READ | 17, 0x400);
@@ -468,6 +492,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-sdhi/cpg-reset", test_cpg_reset);
     qtest_add_func("/rzv2l-sdhi/no-card", test_no_card);
     qtest_add_func("/rzv2l-sdhi/soft-reset", test_soft_reset);
+    qtest_add_func("/rzv2l-sdhi/card-pins-sdhi1", test_card_pins_sdhi1);
     qtest_add_func("/rzv2l-sdhi/pio", test_pio);
     qtest_add_func("/rzv2l-sdhi/dma", test_dma);
     return g_test_run();

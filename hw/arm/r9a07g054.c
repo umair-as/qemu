@@ -356,6 +356,14 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
 
         /* SD_STATUS (the SD0_RST# pin) exists on channel 0 only */
         qdev_prop_set_bit(DEVICE(sbd), "has-sd-status", i == 0);
+        /*
+         * The SMARC module routes neither SD0_WP (its pin carries RIIC3)
+         * nor SD1_WP (unused), and SD0_CD only in the SD pin mux, which
+         * the board's device trees do not select (module UM Table 4.1,
+         * p.20, p.25). SD1_CD comes from the carrier board's slot.
+         */
+        qdev_prop_set_bit(DEVICE(sbd), "cd-connected", i == 1);
+        qdev_prop_set_bit(DEVICE(sbd), "wp-connected", false);
         object_property_set_link(OBJECT(sbd), "dma-memory",
                                  OBJECT(get_system_memory()), &error_abort);
         if (!sysbus_realize(sbd, errp)) {

@@ -267,14 +267,22 @@ static void sdhi_reset_state(RenesasSDHIState *s)
     sdhi_reset_sd_unit(s);
 }
 
-/* The card's pins, seen in SD_INFO1 and SD_INFO2 */
+/*
+ * The card's pins, seen in SD_INFO1: INFO5 is 1 while ISDCD is low (a
+ * card in the slot), INFO7 while ISDWP is low (not write protected),
+ * INFO10 while SDDAT3 is high (a card pulls it up). An input the board
+ * does not route stays high: no card, write protected.
+ */
 static uint32_t sdhi_info1(RenesasSDHIState *s)
 {
     uint32_t v = s->sd_info1;
 
     if (sdbus_get_inserted(&s->sdbus)) {
-        v |= R_SD_INFO1_INFO5_MASK | R_SD_INFO1_INFO10_MASK;
-        if (!sdbus_get_readonly(&s->sdbus)) {
+        v |= R_SD_INFO1_INFO10_MASK;
+        if (s->cd_connected) {
+            v |= R_SD_INFO1_INFO5_MASK;
+        }
+        if (s->wp_connected && !sdbus_get_readonly(&s->sdbus)) {
             v |= R_SD_INFO1_INFO7_MASK;
         }
     }
@@ -956,7 +964,10 @@ static void sdhi_set_inserted(DeviceState *dev, bool inserted)
     RenesasSDHIState *s = RENESAS_SDHI(dev);
 
     /* ISDCD falls on insertion (INFO4) and rises on removal (INFO3) */
-    s->sd_info1 |= inserted ? R_SD_INFO1_INFO4_MASK : R_SD_INFO1_INFO3_MASK;
+    if (s->cd_connected) {
+        s->sd_info1 |= inserted ? R_SD_INFO1_INFO4_MASK
+                                : R_SD_INFO1_INFO3_MASK;
+    }
     sdhi_update_irq(s);
 }
 
@@ -1064,6 +1075,8 @@ static const VMStateDescription vmstate_sdhi = {
 
 static const Property sdhi_props[] = {
     DEFINE_PROP_BOOL("has-sd-status", RenesasSDHIState, has_sd_status, false),
+    DEFINE_PROP_BOOL("cd-connected", RenesasSDHIState, cd_connected, true),
+    DEFINE_PROP_BOOL("wp-connected", RenesasSDHIState, wp_connected, true),
     DEFINE_PROP_LINK("dma-memory", RenesasSDHIState, dma_mr,
                      TYPE_MEMORY_REGION, MemoryRegion *),
 };
