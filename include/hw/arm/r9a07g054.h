@@ -9,11 +9,13 @@
  *  + QOM property "boot-mode": alias of the SYSC "boot-mode" property
  *  + QOM property "debugen": alias of the SYSC "debugen" property
  *  + QOM property "scif0-direct-boot": alias of the SCIF0 "direct-boot"
- *    property; the board sets it when it loads a kernel directly
+ *    property; the board sets it when it loads the kernel itself
  *  + QOM property "cpg-direct-boot": alias of the CPG "direct-boot"
- *    property; the board sets it when it loads a kernel directly
+ *    property; the board sets it when it loads the kernel itself
  *  + QOM property "pfc-direct-boot": alias of the PFC "direct-boot"
- *    property; the board sets it when it loads a kernel directly
+ *    property; the board sets it when it loads the kernel itself
+ *  + QOM property "syc-direct-boot": alias of the SYC "direct-boot"
+ *    property; the board sets it when it loads a kernel without firmware
  *  + child buses "sd-bus0", "sd-bus1": the cards of SDHI0 and SDHI1
  *  + the SoC maps its devices into the system address space at realize
  */

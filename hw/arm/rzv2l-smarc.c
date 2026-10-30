@@ -341,9 +341,11 @@ static void rzv2l_smarc_init(MachineState *machine)
     object_property_set_bool(OBJECT(&s->soc), "debugen", s->debugen,
                              &error_fatal);
     /*
-     * Without firmware, SCIF0 starts as the firmware would have left
-     * the console, and the CPG and PFC with the clocks, resets and pin
-     * functions the firmware would have set up.
+     * When QEMU loads the kernel, BL2 and U-Boot do not run, also with
+     * BL31 from -bios: SCIF0 starts as the firmware would have left the
+     * console, and the CPG and PFC with the clocks, resets and pin
+     * functions the firmware would have set up. Without BL31 the system
+     * counter also starts as BL31 leaves it.
      */
     object_property_set_bool(OBJECT(&s->soc), "scif0-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
@@ -351,6 +353,9 @@ static void rzv2l_smarc_init(MachineState *machine)
                              machine->kernel_filename != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "pfc-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
+    object_property_set_bool(OBJECT(&s->soc), "syc-direct-boot",
+                             machine->kernel_filename && !machine->firmware,
+                             &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
     rzv2l_smarc_attach_sd(s);
 

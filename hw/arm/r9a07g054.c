@@ -201,6 +201,8 @@ static void r9a07g054_init(Object *obj)
     object_initialize_child(obj, "pfc", &s->pfc, TYPE_RENESAS_RZG2L_PFC);
     object_property_add_alias(obj, "pfc-direct-boot", OBJECT(&s->pfc),
                               "direct-boot");
+    object_property_add_alias(obj, "syc-direct-boot", OBJECT(&s->syc),
+                              "direct-boot");
 
     for (i = 0; i < R9A07G054_NUM_OSTM; i++) {
         g_autofree char *name = g_strdup_printf("ostm%d", i);
@@ -353,7 +355,13 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
                                                       s, i));
     }
 
-    /* SYC: the system counter (manual section 15) */
+    /*
+     * SYC: the system counter (manual section 15). After the firmware,
+     * CNTFID0 reads 0x016e3600, 24 MHz (read on the EVK at the U-Boot
+     * prompt).
+     */
+    qdev_prop_set_uint32(DEVICE(&s->syc), "direct-boot-freq",
+                         R9A07G054_CNTFRQ_HZ);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->syc), errp)) {
         return;
     }

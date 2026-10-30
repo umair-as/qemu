@@ -10,7 +10,9 @@
  * section 3.10). Modelled: the control registers firmware programs at
  * boot, CNTCR (enable, halt on debug) and CNTFID0 (the counter frequency
  * that firmware copies into CNTFRQ_EL0), and CNTSR. Firmware writes
- * CNTFID0 itself; the model only stores it.
+ * CNTFID0 itself; the model only stores it. With "direct-boot", the
+ * registers start as firmware leaves them: CNTCR.EN set and CNTFID0 the
+ * "direct-boot-freq" property.
  *
  * Not modelled: the count itself. The CPUs' generic timers count from
  * QEMU's virtual clock whether or not CNTCR.EN is set, and the counter
@@ -26,6 +28,7 @@
 #include "hw/core/sysbus.h"
 #include "hw/core/registerfields.h"
 #include "migration/vmstate.h"
+#include "hw/core/qdev-properties.h"
 #include "hw/timer/coresight_tsgen.h"
 
 REG32(CNTCR, 0x000)
@@ -107,9 +110,15 @@ static void coresight_tsgen_reset_hold(Object *obj, ResetType type)
 {
     CoreSightTSGenState *s = CORESIGHT_TSGEN(obj);
 
-    s->cntcr = 0;
-    s->cntfid0 = 0;
+    s->cntcr = s->direct_boot ? R_CNTCR_EN_MASK : 0;
+    s->cntfid0 = s->direct_boot ? s->direct_boot_freq : 0;
 }
+
+static const Property coresight_tsgen_props[] = {
+    DEFINE_PROP_BOOL("direct-boot", CoreSightTSGenState, direct_boot, false),
+    DEFINE_PROP_UINT32("direct-boot-freq", CoreSightTSGenState,
+                       direct_boot_freq, 0),
+};
 
 static void coresight_tsgen_init(Object *obj)
 {
@@ -138,6 +147,7 @@ static void coresight_tsgen_class_init(ObjectClass *klass, const void *data)
 
     rc->phases.hold = coresight_tsgen_reset_hold;
     dc->vmsd = &vmstate_coresight_tsgen;
+    device_class_set_props(dc, coresight_tsgen_props);
 }
 
 static const TypeInfo coresight_tsgen_info = {
