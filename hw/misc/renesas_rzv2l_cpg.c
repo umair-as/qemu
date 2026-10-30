@@ -27,11 +27,15 @@
  *
  * - The watchdog: CPG_RST_WDT drives the PRESETN line of each WDT
  *   channel (named GPIO output "wdt-presetn", high while the reset is
- *   applied). A rising reset request from a channel (named GPIO input
- *   "wdtrstb") resets the system when its CPG_WDTRST_SEL system-reset
- *   bit (2:0) is set: CPG_WDTOVF_RST then records the channel, and the
- *   flag survives the reset it caused (section 7.2.4.182). The cold
- *   reset and WDTOVFOUT pin selections (bits 10:8, 6:4) are stored only.
+ *   applied). A reset request from a channel (named GPIO input
+ *   "wdtrstb", a level) resets the system while its CPG_WDTRST_SEL
+ *   system-reset bit (2:0) is set, also when the bit is set after the
+ *   request: CPG_WDTOVF_RST then records the channel. The flag is read
+ *   after the release from the reset it caused (section 7.2.4.182), so
+ *   no system reset clears it; a system reset initialises
+ *   CPG_WDTRST_SEL (the note to section 7.2.4.183). Only power-on
+ *   clears the flag (the model's reading). The cold reset and WDTOVFOUT
+ *   pin selections (bits 10:8, 6:4) are stored only.
  * Nothing else in the SoC sees the clock, reset or module-stop state.
  * The PLL monitors, PLL4, PLL6, PLL5 output settings and the Cortex-A55
  * power handshake are not modelled, nor are offsets the manual does not
@@ -331,6 +335,21 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
 #define CPG_WDTRST_SEL      0xb14
 #define CPG_WDTOVF_MASK     0x7
 
+/*
+ * Channel @n requests a reset: WDTRSTB is a level, so a request that was
+ * masked acts once CPG_WDTRST_SEL unmasks it while it is still held.
+ */
+static void rzv2l_cpg_wdt_request(RenesasRZV2LCPGState *s, int n)
+{
+    if (!(s->regs[cpg_index[CPG_WDTRST_SEL / 4]] & BIT(n))) {
+        trace_renesas_rzv2l_cpg_wdt_reset(n, false);
+        return;
+    }
+    trace_renesas_rzv2l_cpg_wdt_reset(n, true);
+    s->wdtovf |= BIT(n);
+    watchdog_perform_action();
+}
+
 /* PRESETN of each watchdog channel: held while its RST_WDT bit is 0 */
 static void rzv2l_cpg_update_wdt(RenesasRZV2LCPGState *s)
 {
@@ -415,8 +434,8 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
 {
     RenesasRZV2LCPGState *s = RENESAS_RZV2L_CPG(opaque);
     const CPGReg *r;
-    uint32_t mask;
-    int idx;
+    uint32_t mask, old;
+    int idx, n;
 
     r = cpg_lookup(offset, &idx);
     if (!r) {
@@ -445,9 +464,16 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
                       __func__, r->name);
         return MEMTX_OK;
     }
+    old = s->regs[idx];
     s->regs[idx] = (s->regs[idx] & ~mask) | (data & mask);
     if (offset == CPG_RST_WDT) {
         rzv2l_cpg_update_wdt(s);
+    } else if (offset == CPG_WDTRST_SEL) {
+        for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
+            if ((s->regs[idx] & ~old & BIT(n)) && s->wdtrstb[n]) {
+                rzv2l_cpg_wdt_request(s, n);
+            }
+        }
     }
     return MEMTX_OK;
 }
@@ -493,16 +519,9 @@ static void rzv2l_cpg_wdtrstb(void *opaque, int n, int level)
     bool rising = level && !s->wdtrstb[n];
 
     s->wdtrstb[n] = level;
-    if (!rising) {
-        return;
+    if (rising) {
+        rzv2l_cpg_wdt_request(s, n);
     }
-    if (!(s->regs[cpg_index[CPG_WDTRST_SEL / 4]] & BIT(n))) {
-        trace_renesas_rzv2l_cpg_wdt_reset(n, false);
-        return;
-    }
-    trace_renesas_rzv2l_cpg_wdt_reset(n, true);
-    s->wdtovf |= BIT(n);
-    watchdog_perform_action();
 }
 
 static void rzv2l_cpg_init(Object *obj)
