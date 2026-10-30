@@ -12,6 +12,8 @@
  *
  * QEMU interface:
  *  + sysbus MMIO region 0: the IA55 registers
+ *  + sysbus IRQs 0-7: the IRQ0-7 interrupts to the GIC, active high
+ *  + named GPIO inputs "irq" 0-7: the level of pin IRQn
  */
 
 #ifndef HW_INTC_RENESAS_RZG2L_IRQC_H
@@ -25,6 +27,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZG2LIRQCState, RENESAS_RZG2L_IRQC)
 
 #define RENESAS_RZG2L_IRQC_MMIO_SIZE 0x10000
 #define RENESAS_RZG2L_IRQC_NUM_REGS 19
+#define RENESAS_RZG2L_IRQC_NUM_IRQ 8
 
 struct RenesasRZG2LIRQCState {
     /*< private >*/
@@ -33,6 +36,8 @@ struct RenesasRZG2LIRQCState {
     /*< public >*/
     MemoryRegion iomem;
     uint32_t regs[RENESAS_RZG2L_IRQC_NUM_REGS];
+    bool irq_pin[RENESAS_RZG2L_IRQC_NUM_IRQ];
+    qemu_irq irq_out[RENESAS_RZG2L_IRQC_NUM_IRQ];
 };
 
 #endif

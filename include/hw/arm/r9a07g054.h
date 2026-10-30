@@ -15,6 +15,10 @@
  *  + QOM property "pfc-direct-boot": alias of the PFC "direct-boot"
  *    property; the board sets it when it loads a kernel directly
  *  + child buses "sd-bus0", "sd-bus1": the cards of SDHI0 and SDHI1
+ *  + public children "eth[0]", "eth[1]": the Gigabit Ethernet channels;
+ *    the board sets their NIC and "phy" link before realizing the
+ *    SoC, and wires their "phy-link" input
+ *  + public child "irqc": its "irq" inputs 0-7 are the IRQ0-7 pins
  *  + the SoC maps its devices into the system address space at realize
  */
 
@@ -31,6 +35,7 @@
 #include "hw/intc/renesas_rzg2l_irqc.h"
 #include "hw/gpio/renesas_rzg2l_pfc.h"
 #include "hw/sd/renesas_sdhi.h"
+#include "hw/net/renesas_gbeth.h"
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
 #include "qemu/units.h"
@@ -49,6 +54,7 @@ enum {
     /* WDT0, WDT1: Cortex-A55 cores 0 and 1; WDT2: Cortex-M33 */
     R9A07G054_NUM_WDT   = 3,
     R9A07G054_NUM_SDHI  = 2,
+    R9A07G054_NUM_ETH   = 2,
 };
 
 struct R9A07G054State {
@@ -64,6 +70,7 @@ struct R9A07G054State {
     RenesasRZOSTMState ostm[R9A07G054_NUM_OSTM];
     RenesasRZG2LWDTState wdt[R9A07G054_NUM_WDT];
     RenesasSDHIState sdhi[R9A07G054_NUM_SDHI];
+    RenesasGbEthState eth[R9A07G054_NUM_ETH];
     RenesasRZG2LIRQCState irqc;
     RenesasRZG2LPFCState pfc;
 };

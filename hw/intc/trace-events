@@ -360,4 +360,5 @@ riscv_aplic_write(uint64_t offset, unsigned size, uint64_t value) "offset: 0x%" 
 
 # renesas_rzg2l_irqc.c
 renesas_rzg2l_irqc_read(const char *name, uint64_t offset, uint64_t data) "%s (0x%" PRIx64 ") -> 0x%" PRIx64
+renesas_rzg2l_irqc_irq_pin(int n, int level) "IRQ%d pin %d"
 renesas_rzg2l_irqc_write(const char *name, uint64_t offset, uint64_t data) "%s (0x%" PRIx64 ") <- 0x%" PRIx64
