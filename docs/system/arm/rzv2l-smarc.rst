@@ -17,10 +17,24 @@ Supported devices
    loopback and the five interrupt lines.
    SCIF0 is the board console and takes the first ``-serial`` backend;
    SCIF1-4 take the next ones.
+ * Clock Pulse Generator (CPG): the clock, reset and module-stop
+   registers, with their monitors; the clocks and resets have no effect
+   on the other devices, except the watchdog reset lines
+ * OS timers OSTM0-2
+ * Pin function controller: the pin registers, without electrical
+   effect
+ * Interrupt control unit (IA55): the registers only, no interrupt
+   routing
+ * Watchdog timers WDT0-2. A watchdog reset request resets the system
+   when the CPG's ``CPG_WDTRST_SEL`` allows it; ``-action watchdog=``
+   selects what a reset does.
 
 Missing devices
 ---------------
 
+Ethernet, SD/eMMC, I2C, USB, the QSPI controller, the display, CAN-FD,
+the ADC, the thermal sensor and the DMA controller are stubs: they log
+every access and read as zero, so their drivers fail when they probe.
 Every other on-chip block is missing. The serial ports have no modem
 lines, break or error detection, and do not enforce the baud rate.
 Accesses to unmodelled addresses,
