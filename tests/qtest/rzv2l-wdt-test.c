@@ -166,7 +166,8 @@ static void test_reset_request(void)
     g_assert_cmphex(wdt_rd(qts, 0, WDTSET), ==, WDTSET_RESET);
     /*
      * The flag is read after the reset it reports (section 7.2.4.182);
-     * a system reset initialises WDTRST_SEL (note to section 7.2.4.183)
+     * a system reset initialises WDTRST_SEL (an inference from the note
+     * to section 7.2.4.183, which resets WDTRSTSEL7)
      */
     g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0x1);
     g_assert_cmphex(cpg_rd(qts, CPG_WDTRST_SEL), ==, WDTRST_SEL_RESET);

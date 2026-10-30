@@ -32,9 +32,10 @@
  *   system-reset bit (2:0) is set, also when the bit is set after the
  *   request: CPG_WDTOVF_RST then records the channel. The flag is read
  *   after the release from the reset it caused (section 7.2.4.182), so
- *   no system reset clears it; a system reset initialises
- *   CPG_WDTRST_SEL (the note to section 7.2.4.183). Only power-on
- *   clears the flag (the model's reading). The cold reset and WDTOVFOUT
+ *   no system reset clears it. A system reset initialises
+ *   CPG_WDTRST_SEL: an inference from the note to section 7.2.4.183,
+ *   which has a system reset return WDTRSTSEL7 to its initial value.
+ *   Only power-on clears the flag (the model's reading). The cold reset and WDTOVFOUT
  *   pin selections (bits 10:8, 6:4) are stored only.
  * Nothing else in the SoC sees the clock, reset or module-stop state.
  * The PLL monitors, PLL4, PLL6, PLL5 output settings and the Cortex-A55
