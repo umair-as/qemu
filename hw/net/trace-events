@@ -535,3 +535,12 @@ ksz9131_phy_write(int reg, uint16_t val) "reg 0x%02x <- 0x%04x"
 ksz9131_phy_mmd(const char *op, int devad, uint16_t reg, uint16_t val) "MMD %s %d.0x%x 0x%04x"
 ksz9131_phy_link(int up) "link %d"
 
+# renesas_gbeth.c
+renesas_gbeth_read(uint64_t offset, uint32_t val) "0x%03" PRIx64 " -> 0x%08" PRIx32
+renesas_gbeth_write(uint64_t offset, uint32_t val) "0x%03" PRIx64 " <- 0x%08" PRIx32
+renesas_gbeth_opmode(unsigned from, unsigned to) "OPC %u -> %u"
+renesas_gbeth_tx(uint32_t len) "transmit %" PRIu32 " bytes"
+renesas_gbeth_rx(size_t len, uint8_t msc) "receive %zu bytes, MSC 0x%02x"
+renesas_gbeth_queue_error(int q, unsigned et, uint64_t addr) "queue %d error type %u at 0x%" PRIx64
+renesas_gbeth_mdio(int write, uint8_t reg, uint16_t val) "MDIO write %d reg 0x%02x 0x%04x"
+renesas_gbeth_reset(int level) "reset %d"

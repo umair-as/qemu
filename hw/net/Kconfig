@@ -165,3 +165,7 @@ config CAN_FLEXCAN
 
 config KSZ9131_PHY
     bool
+
+config RENESAS_GBETH
+    bool
+    select KSZ9131_PHY
