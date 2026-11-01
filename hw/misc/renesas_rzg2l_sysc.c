@@ -244,7 +244,9 @@ static void rzg2l_sysc_reset_hold(Object *obj, ResetType type)
 {
     RenesasRZG2LSysCState *s = RENESAS_RZG2L_SYSC(obj);
 
-    memset(s->rvba, 0, sizeof(s->rvba));
+    /* Initial values: RVAL0 0, RVAL1 0x00020000 (Table 6.1, 6.3.40) */
+    s->rvba[0] = 0;
+    s->rvba[1] = 0x20000;
     s->lp_ctl1 = 0;
     s->lp_ctl2 = 0;
     s->lp_ctl5 = 0;

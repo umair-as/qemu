@@ -212,16 +212,21 @@ static void test_gic_identity(void)
  */
 static void test_sysc_ca55(void)
 {
-    static const uint32_t regs[] = {
-        SYS_CA55_CFG_RVAL0, SYS_CA55_CFG_RVAH0, SYS_CA55_CFG_RVAL1,
-        SYS_CA55_CFG_RVAH1, SYS_LP_CTL1, SYS_LP_CTL2, SYS_LP_CTL5,
-        SYS_LP_CTL6,
+    /* Initial values: manual Table 6.1 */
+    static const struct {
+        uint32_t reg, value;
+    } regs[] = {
+        { SYS_CA55_CFG_RVAL0, 0 }, { SYS_CA55_CFG_RVAH0, 0 },
+        { SYS_CA55_CFG_RVAL1, 0x00020000 }, { SYS_CA55_CFG_RVAH1, 0 },
+        { SYS_LP_CTL1, 0 }, { SYS_LP_CTL2, 0 }, { SYS_LP_CTL5, 0 },
+        { SYS_LP_CTL6, 0 },
     };
     QTestState *qts = qtest_init("-machine rzv2l-smarc");
     int i;
 
     for (i = 0; i < ARRAY_SIZE(regs); i++) {
-        g_assert_cmphex(qtest_readl(qts, SYSC_BASE + regs[i]), ==, 0);
+        g_assert_cmphex(qtest_readl(qts, SYSC_BASE + regs[i].reg), ==,
+                        regs[i].value);
     }
     qtest_writel(qts, SYSC_BASE + SYS_CA55_CFG_RVAL1, 0xffffffff);
     qtest_writel(qts, SYSC_BASE + SYS_CA55_CFG_RVAH1, 0xffffffff);
@@ -245,7 +250,9 @@ static void test_sysc_ca55(void)
     g_assert_cmphex(qtest_readl(qts, SYSC_BASE + SYS_LP_CTL5), ==, 0);
 
     qtest_system_reset(qts);
-    g_assert_cmphex(qtest_readl(qts, SYSC_BASE + SYS_CA55_CFG_RVAL1), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, SYSC_BASE + SYS_CA55_CFG_RVAL1), ==,
+                    0x00020000);
+    g_assert_cmphex(qtest_readl(qts, SYSC_BASE + SYS_CA55_CFG_RVAH1), ==, 0);
     g_assert_cmphex(qtest_readl(qts, SYSC_BASE + SYS_LP_CTL1), ==, 0);
     qtest_quit(qts);
 }
