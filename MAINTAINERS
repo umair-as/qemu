@@ -1041,6 +1041,7 @@ Renesas RZ/V2L SMARC EVK
 M: Umair Ahmed Shah <umairahmedshah@hotmail.com>
 L: qemu-arm@nongnu.org
 S: Maintained
+F: .github/workflows/rzv2l.yml
 F: hw/arm/r9a07g054.c
 F: hw/arm/rzv2l-smarc.c
 F: hw/char/renesas_rz_scifa.c
