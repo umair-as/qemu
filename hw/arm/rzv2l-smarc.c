@@ -19,9 +19,11 @@
  *
  * With -bios, the image is the board's TF-A BL31 and runs at EL3 as the
  * PSCI firmware. The machine does what BL2 does before it: it loads BL31,
- * the kernel (as BL33) and its device tree, writes BL2's parameter block
- * for BL31 into SRAM, and starts CPU0 in a stub that enters BL31 as BL2
- * does. The boot ROM, BL2 and DDR initialisation are not run.
+ * the optional Trusted OS (the "bl32" property, OP-TEE) and the next image
+ * (BL33): the boot loader given by the "bl33" property (U-Boot), or the
+ * kernel and its device tree. It writes BL2's parameter block for BL31
+ * into SRAM, and starts CPU0 in a stub that enters BL31 as BL2 does. The
+ * boot ROM, BL2 and DDR initialisation are not run.
  */
 
 #include "qemu/osdep.h"
@@ -61,13 +63,20 @@ static const int rzv2l_smarc_phy_irq[R9A07G054_NUM_ETH] = { 2, 3 };
 /*
  * Firmware mode: where TF-A's BL2 for the board puts each image, and
  * where it leaves BL31's parameters (TF-A plat/renesas/rz/common/include:
- * BL31_BASE, BL31_LIMIT, PARAMS_BASE, BL2_BASE). The kernel and its DTB
- * go where U-Boot puts them on the board.
+ * BL31_BASE, BL31_LIMIT, BL32_BASE, BL32_LIMIT, BL33_BASE, BL33_LIMIT,
+ * FDT_BASE, FDT_SIZE, PARAMS_BASE, BL2_BASE). A kernel and its DTB given
+ * as BL33 go where U-Boot puts them on the board.
  */
 #define RZV2L_SMARC_BL2_BASE        0x00012000
 #define RZV2L_SMARC_BL31_PARAMS     0x0002f000
 #define RZV2L_SMARC_BL31_BASE       0x44000000
 #define RZV2L_SMARC_BL31_SIZE       0x00040000
+#define RZV2L_SMARC_BL32_BASE       0x44100000
+#define RZV2L_SMARC_BL32_SIZE       0x00100000
+#define RZV2L_SMARC_BL33_BASE       0x50000000
+#define RZV2L_SMARC_BL33_SIZE       0x08000000
+#define RZV2L_SMARC_BL2_FDT         0x58000000
+#define RZV2L_SMARC_BL2_FDT_SIZE    0x1000
 #define RZV2L_SMARC_BL33_KERNEL     0x48200000
 #define RZV2L_SMARC_BL33_DTB        0x58000000
 #define RZV2L_SMARC_BL33_DTB_SIZE   (2 * MiB)
@@ -85,6 +94,10 @@ struct RZV2LSmarcState {
     /* Board switches, latched by the SoC at power-on */
     uint8_t boot_mode;
     bool debugen;
+
+    /* Firmware mode: the Trusted OS and boot loader images BL2 loads */
+    char *bl32;
+    char *bl33;
 };
 
 /*
@@ -289,15 +302,14 @@ static const uint32_t rzv2l_smarc_bl2_stub[] = {
 /*
  * BL2's parameter block for BL31, bl2_to_bl31_params_mem_t (TF-A
  * plat/renesas/rz/common/include/rz_private.h): the boot kind, then the
- * BL32 and BL33 entry points. BL2 zeroes it, so the boot kind is a cold
- * boot, and fills in the entry point of each image it loaded
- * (plat/renesas/rz/common/bl2_plat_setup.c,
- * bl2_plat_handle_post_image_load()). Only BL33 is given, so BL31 starts
- * no BL32. BL2 gives
- * U-Boot the address of its own device tree in x1; for a Linux BL33 the
- * device tree goes in x0, as the arm64 boot protocol requires.
+ * BL32 and BL33 entry points, each an entry_point_info_t. BL2 zeroes it,
+ * so the boot kind is a cold boot, and copies in the entry point of each
+ * image it loaded (plat/renesas/rz/common/bl2_plat_setup.c,
+ * bl2_plat_handle_post_image_load(), from bl2_plat_mem_params_desc.c).
+ * BL31 starts a BL32 only when its entry point is set.
  */
 #define BL31_PARAMS_SIZE        184
+#define BL31_PARAMS_BL32_EP     8
 #define BL31_PARAMS_BL33_EP     96
 #define EP_PC                   8
 #define EP_SPSR                 16
@@ -305,23 +317,69 @@ static const uint32_t rzv2l_smarc_bl2_stub[] = {
 #define PARAM_EP                1
 #define VERSION_2               2
 #define EP_INFO_SIZE            88
+#define EP_SECURE_EXEC          0x8         /* SECURE | EXECUTABLE */
 #define EP_NON_SECURE_EXEC      0x9         /* NON_SECURE | EXECUTABLE */
 #define SPSR_EL1H_DAIF          0x3c5       /* EL1h, DAIF masked */
+#define MODE_RW_64              0
 
-static void rzv2l_smarc_write_bl31_params(hwaddr kernel, hwaddr dtb)
+static void rzv2l_smarc_set_ep(uint8_t *ep, uint32_t attr, hwaddr pc,
+                               uint32_t spsr)
 {
-    uint8_t params[BL31_PARAMS_SIZE] = { 0 };
-    uint8_t *ep = params + BL31_PARAMS_BL33_EP;
-
     ep[0] = PARAM_EP;
     ep[1] = VERSION_2;
     stw_le_p(ep + 2, EP_INFO_SIZE);
-    stl_le_p(ep + 4, EP_NON_SECURE_EXEC);
-    stq_le_p(ep + EP_PC, kernel);
-    stl_le_p(ep + EP_SPSR, SPSR_EL1H_DAIF);
-    stq_le_p(ep + EP_ARGS, dtb);
+    stl_le_p(ep + 4, attr);
+    stq_le_p(ep + EP_PC, pc);
+    stl_le_p(ep + EP_SPSR, spsr);
+}
+
+/*
+ * bl32: the Trusted OS's entry point, or 0 for none. BL2 starts it with
+ * SPSR 0 (BL31's dispatcher sets the mode) and arg0 MODE_RW_64: the OP-TEE
+ * dispatcher reads arg0 as the Trusted OS's execution state
+ * (services/spd/opteed/opteed_main.c). arg1-arg3 are 0.
+ * BL33 gets arg0 = arg0, arg1 = arg1: for U-Boot, BL2 passes its own
+ * device tree in x1; for a Linux BL33 the device tree goes in x0, as the
+ * arm64 boot protocol requires.
+ */
+static void rzv2l_smarc_write_bl31_params(hwaddr bl32, hwaddr bl33,
+                                          uint64_t arg0, uint64_t arg1)
+{
+    uint8_t params[BL31_PARAMS_SIZE] = { 0 };
+    uint8_t *ep;
+
+    if (bl32) {
+        ep = params + BL31_PARAMS_BL32_EP;
+        rzv2l_smarc_set_ep(ep, EP_SECURE_EXEC, bl32, 0);
+        stq_le_p(ep + EP_ARGS, MODE_RW_64);
+    }
+    ep = params + BL31_PARAMS_BL33_EP;
+    rzv2l_smarc_set_ep(ep, EP_NON_SECURE_EXEC, bl33, SPSR_EL1H_DAIF);
+    stq_le_p(ep + EP_ARGS, arg0);
+    stq_le_p(ep + EP_ARGS + 8, arg1);
     rom_add_blob_fixed("bl31-params", params, sizeof(params),
                        RZV2L_SMARC_BL31_PARAMS);
+}
+
+/*
+ * The device tree BL2 builds for U-Boot (bl2_init_fdt()): an empty tree
+ * whose root carries the address and size cells and the board's
+ * compatible strings, in a 4 KiB area at FDT_BASE.
+ */
+static void rzv2l_smarc_write_bl2_fdt(void)
+{
+    static const char compat[] = "renesas,smarc-rzv2l\0renesas,r9a07g054l2";
+    g_autofree void *fdt = g_malloc0(RZV2L_SMARC_BL2_FDT_SIZE);
+
+    if (fdt_create_empty_tree(fdt, RZV2L_SMARC_BL2_FDT_SIZE) ||
+        fdt_setprop_u32(fdt, 0, "#address-cells", 2) ||
+        fdt_setprop_u32(fdt, 0, "#size-cells", 2) ||
+        fdt_setprop(fdt, 0, "compatible", compat, sizeof(compat))) {
+        error_report("couldn't build BL2's device tree for BL33");
+        exit(1);
+    }
+    rom_add_blob_fixed("bl2-fdt", fdt, RZV2L_SMARC_BL2_FDT_SIZE,
+                       RZV2L_SMARC_BL2_FDT);
 }
 
 /* CPU objects are not reset with the machine; CPU0 restarts in the stub */
@@ -350,12 +408,17 @@ static void rzv2l_smarc_firmware_boot(RZV2LSmarcState *s,
 {
     g_autofree char *bl31 = NULL;
     uint8_t header[64];
+    hwaddr bl32 = 0;
     CPUState *cs;
     int fd;
 
-    if (!machine->kernel_filename || !machine->dtb) {
-        error_report("-bios (TF-A BL31) needs -kernel and -dtb: the kernel "
-                     "is BL31's next image");
+    if (s->bl33 && (machine->kernel_filename || machine->dtb)) {
+        error_report("bl33 and -kernel/-dtb both name BL31's next image");
+        exit(1);
+    }
+    if (!s->bl33 && (!machine->kernel_filename || !machine->dtb)) {
+        error_report("-bios (TF-A BL31) needs the bl33 property or -kernel "
+                     "and -dtb: BL31's next image");
         exit(1);
     }
     if (machine->initrd_filename) {
@@ -366,6 +429,27 @@ static void rzv2l_smarc_firmware_boot(RZV2LSmarcState *s,
     if (!bl31) {
         error_report("couldn't find BL31 image '%s'", machine->firmware);
         exit(1);
+    }
+    rzv2l_smarc_load("BL31", bl31, RZV2L_SMARC_BL31_BASE,
+                     RZV2L_SMARC_BL31_SIZE);
+    if (s->bl32) {
+        rzv2l_smarc_load("BL32", s->bl32, RZV2L_SMARC_BL32_BASE,
+                         RZV2L_SMARC_BL32_SIZE);
+        bl32 = RZV2L_SMARC_BL32_BASE;
+    }
+    rom_add_blob_fixed("bl2-stub", rzv2l_smarc_bl2_stub,
+                       sizeof(rzv2l_smarc_bl2_stub), RZV2L_SMARC_BL2_BASE);
+    CPU_FOREACH(cs) {
+        qemu_register_reset(rzv2l_smarc_firmware_cpu_reset, cs);
+    }
+
+    if (s->bl33) {
+        rzv2l_smarc_load("BL33", s->bl33, RZV2L_SMARC_BL33_BASE,
+                         RZV2L_SMARC_BL33_SIZE);
+        rzv2l_smarc_write_bl2_fdt();
+        rzv2l_smarc_write_bl31_params(bl32, RZV2L_SMARC_BL33_BASE, 0,
+                                      RZV2L_SMARC_BL2_FDT);
+        return;
     }
 
     /* An arm64 Image with text_offset 0: placed at a 2 MiB boundary */
@@ -378,8 +462,6 @@ static void rzv2l_smarc_firmware_boot(RZV2LSmarcState *s,
     }
     close(fd);
 
-    rzv2l_smarc_load("BL31", bl31, RZV2L_SMARC_BL31_BASE,
-                     RZV2L_SMARC_BL31_SIZE);
     rzv2l_smarc_load("kernel", machine->kernel_filename,
                      RZV2L_SMARC_BL33_KERNEL,
                      RZV2L_SMARC_BL33_DTB - RZV2L_SMARC_BL33_KERNEL);
@@ -389,14 +471,8 @@ static void rzv2l_smarc_firmware_boot(RZV2LSmarcState *s,
                      &address_space_memory, machine, &s->soc.cpu[0]) < 0) {
         exit(1);
     }
-    rzv2l_smarc_write_bl31_params(RZV2L_SMARC_BL33_KERNEL,
-                                  RZV2L_SMARC_BL33_DTB);
-    rom_add_blob_fixed("bl2-stub", rzv2l_smarc_bl2_stub,
-                       sizeof(rzv2l_smarc_bl2_stub), RZV2L_SMARC_BL2_BASE);
-
-    CPU_FOREACH(cs) {
-        qemu_register_reset(rzv2l_smarc_firmware_cpu_reset, cs);
-    }
+    rzv2l_smarc_write_bl31_params(bl32, RZV2L_SMARC_BL33_KERNEL,
+                                  RZV2L_SMARC_BL33_DTB, 0);
 }
 
 static void rzv2l_smarc_init(MachineState *machine)
@@ -433,6 +509,12 @@ static void rzv2l_smarc_init(MachineState *machine)
                              machine->kernel_filename != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "cpg-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
+    /*
+     * With a boot loader as BL33 the clocks and resets start as BL2
+     * leaves them; the boot loader sets up the console and pins itself.
+     */
+    object_property_set_bool(OBJECT(&s->soc), "cpg-bl2-boot",
+                             s->bl33 != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "pfc-direct-boot",
                              machine->kernel_filename != NULL, &error_fatal);
     object_property_set_bool(OBJECT(&s->soc), "syc-direct-boot",
@@ -448,6 +530,11 @@ static void rzv2l_smarc_init(MachineState *machine)
 
     if (qtest_enabled()) {
         return;
+    }
+    if ((s->bl32 || s->bl33) && !machine->firmware) {
+        error_report("bl32 and bl33 need -bios (TF-A BL31), which starts "
+                     "them");
+        exit(1);
     }
     if (machine->firmware) {
         rzv2l_smarc_firmware_boot(s, machine);
@@ -474,6 +561,34 @@ static bool rzv2l_smarc_get_debugen(Object *obj, Error **errp)
 static void rzv2l_smarc_set_debugen(Object *obj, bool value, Error **errp)
 {
     RZV2L_SMARC_MACHINE(obj)->debugen = value;
+}
+
+static char *rzv2l_smarc_get_bl32(Object *obj, Error **errp)
+{
+    return g_strdup(RZV2L_SMARC_MACHINE(obj)->bl32);
+}
+
+static void rzv2l_smarc_set_bl32(Object *obj, const char *value,
+                                 Error **errp)
+{
+    RZV2LSmarcState *s = RZV2L_SMARC_MACHINE(obj);
+
+    g_free(s->bl32);
+    s->bl32 = g_strdup(value);
+}
+
+static char *rzv2l_smarc_get_bl33(Object *obj, Error **errp)
+{
+    return g_strdup(RZV2L_SMARC_MACHINE(obj)->bl33);
+}
+
+static void rzv2l_smarc_set_bl33(Object *obj, const char *value,
+                                 Error **errp)
+{
+    RZV2LSmarcState *s = RZV2L_SMARC_MACHINE(obj);
+
+    g_free(s->bl33);
+    s->bl33 = g_strdup(value);
 }
 
 static void rzv2l_smarc_machine_class_init(ObjectClass *oc, const void *data)
@@ -503,6 +618,16 @@ static void rzv2l_smarc_machine_class_init(ObjectClass *oc, const void *data)
                                    rzv2l_smarc_set_debugen);
     object_class_property_set_description(oc, "debugen",
         "DEBUGEN pin (default off)");
+    object_class_property_add_str(oc, "bl32", rzv2l_smarc_get_bl32,
+                                  rzv2l_smarc_set_bl32);
+    object_class_property_set_description(oc, "bl32",
+        "With -bios: Trusted OS image (OP-TEE tee-raw.bin), loaded at "
+        "0x44100000 and started by BL31");
+    object_class_property_add_str(oc, "bl33", rzv2l_smarc_get_bl33,
+                                  rzv2l_smarc_set_bl33);
+    object_class_property_set_description(oc, "bl33",
+        "With -bios: boot loader image (U-Boot u-boot.bin), loaded at "
+        "0x50000000 and entered by BL31 at EL1, in place of -kernel/-dtb");
 }
 
 static const TypeInfo rzv2l_smarc_machine_types[] = {

@@ -136,7 +136,9 @@ static const struct {
  * every access. Reads return 0, or with retain_writes the last value
  * written: the DMA controller driver writes its channel registers at
  * probe and only reads them back to run a transfer; the USB PHY control
- * driver sets and clears reset bits with read-modify-writes.
+ * driver sets and clears reset bits with read-modify-writes. The boot
+ * loader reads the DDR memory controller's ECC enable bits to choose its
+ * device tree: 0 is the board without ECC.
  */
 static const struct {
     const char *name;
@@ -163,6 +165,7 @@ static const struct {
     { "canfd",          0x10050000, 0x8000,  false },
     { "adc",            0x10059000, 0x400,   false },
     { "usb0-func",      0x11c60000, 0x10000, false },
+    { "ddr-memc",       0x11410000, 0x10000, false },
     { "rpc-if",         0x10060000, 0x10000, false },
     { "rpc-if-wbuf",    0x10070000, 0x10000, false },
     { "rpc-if-dirmap",  0x20000000, 0x10000000, false },
@@ -291,6 +294,8 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
 
         object_property_set_int(cpuobj, "mp-affinity",
                                 r9a07g054_mp_affinity[i], &error_abort);
+        /* Cores in Aff1, threads in Aff0: MPIDR.MT = 1 */
+        object_property_set_bool(cpuobj, "mpidr-mt", true, &error_abort);
         object_property_set_int(cpuobj, "cntfrq", R9A07G054_CNTFRQ_HZ,
                                 &error_abort);
         object_property_set_bool(cpuobj, "has_el3", true, &error_abort);

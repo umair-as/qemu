@@ -58,7 +58,8 @@ Missing devices
 ---------------
 
 I2C, USB, the QSPI controller, the display, CAN-FD,
-the ADC, the thermal sensor and the DMA controller are stubs: they log
+the ADC, the thermal sensor, the DMA controller and the DDR memory
+controller (which reads as a board without ECC) are stubs: they log
 every access and read as zero, so their drivers fail when they probe.
 Every other on-chip block is missing. The serial ports have no modem
 lines, break or error detection, and do not enforce the baud rate.
@@ -138,8 +139,19 @@ it loads BL31 at 0x44000000, the ``-kernel`` image (an arm64 Linux
 ``Image``) at 0x48200000 and its device tree at 0x58000000, and leaves
 BL2's parameter block for BL31 at 0x2f000 in SRAM. The kernel is BL31's
 next image, entered at non-secure EL1. The boot ROM, BL2 and the DDR
-initialisation are not run, there is no OP-TEE, and ``-initrd`` is not
-supported. The firmware does not implement PSCI ``SYSTEM_OFF``.
+initialisation are not run, and ``-initrd`` is not supported. The
+firmware does not implement PSCI ``SYSTEM_OFF``.
+
+Two machine properties name the other images BL2 loads. ``bl32`` is a
+Trusted OS (OP-TEE's ``tee-raw.bin``), loaded at 0x44100000 and started
+by BL31 at secure EL1 as a 64-bit image. ``bl33`` is a boot loader
+(U-Boot's ``u-boot.bin``), loaded at 0x50000000 and entered at
+non-secure EL1 with the address of BL2's small device tree, at
+0x58000000, in ``x1``; it replaces ``-kernel`` and ``-dtb``. With
+``bl33`` the clock controller starts as BL2 leaves it, and the boot
+loader finds the kernel itself, for instance on the SD card. The board's
+U-Boot starts WDT0 with a 60 second timeout, so a guest that does not
+feed ``/dev/watchdog0`` is reset.
 
 .. code-block:: bash
 
@@ -148,4 +160,8 @@ supported. The firmware does not implement PSCI ``SYSTEM_OFF``.
       -kernel Image \
       -dtb r9a07g054l2-smarc.dtb \
       -append "rw rootwait root=/dev/mmcblk0p2" \
+      -drive if=sd,index=0,format=raw,file=sd.img
+
+  $ qemu-system-aarch64 -M rzv2l-smarc,bl32=tee-raw.bin,bl33=u-boot.bin \
+      -bios bl31.bin \
       -drive if=sd,index=0,format=raw,file=sd.img
