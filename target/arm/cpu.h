@@ -1057,6 +1057,14 @@ struct ArchCPU {
     /* Uniprocessor system with MP extensions */
     bool mp_is_up;
 
+    /*
+     * MPIDR.MT: the lowest affinity level counts threads, so the core
+     * number is in Aff1. A board sets it when its affinity layout puts
+     * the cores in Aff1, as DynamIQ clusters do even for single-threaded
+     * cores.
+     */
+    bool mpidr_mt;
+
     /* True if we tried kvm_arm_host_cpu_features() during CPU instance_init
      * and the probe failed (so we need to report the error in realize)
      */

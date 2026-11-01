@@ -3027,6 +3027,9 @@ static uint64_t mpidr_read_val(CPUARMState *env)
             mpidr |= (1u << 30);
         }
     }
+    if (cpu->mpidr_mt) {
+        mpidr |= (1u << 24);
+    }
     return mpidr;
 }
 
