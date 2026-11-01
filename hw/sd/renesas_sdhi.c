@@ -29,7 +29,10 @@
  *   response, as Figures 40.22 and 40.23 do; then the DMAC takes over
  *   from SD_BUF0, starting with the block already in the buffer.
  * - In normal mode (SD_CMD[10:8] = 000) the card's answer gives the
- *   response length; only CMD17, CMD18, CMD24 and CMD25 carry data.
+ *   response length and the command index the data phase (Table 40.8):
+ *   CMD6, CMD17, CMD18, CMD24, CMD25, CMD27, CMD30, CMD42, ACMD13,
+ *   ACMD22 and ACMD51; the data phases of CMD19 (tuning) and CMD56 are
+ *   not modelled and are logged.
  * - Flags in SD_INFO1, SD_INFO2, SDIO_INFO1 and DM_CM_INFO1/2 clear when
  *   0 is written to them; writing 1 leaves them. OXMNIRQ is high while a
  *   card access, card detect or DMAC flag is set and not masked, as is
@@ -406,17 +409,32 @@ static void sdhi_start_command(RenesasSDHIState *s)
         return;
     }
     if (mode == MODE_NORMAL) {
-        /* Normal mode: only the block read and write commands carry data */
-        data = index == 17 || index == 18 || index == 24 || index == 25;
-        read = index == 17 || index == 18;
-        multi = index == 18 || index == 25;
+        /*
+         * Normal mode: the host takes the transfer from the SD command
+         * index (section 40.4.14, Table 40.8). With data: CMD6, CMD17,
+         * CMD18 and CMD30 read, CMD24, CMD25, CMD27 and CMD42 write;
+         * ACMD13, ACMD22 and ACMD51 read.
+         */
+        bool acmd = FIELD_EX32(cmd, SD_CMD, ACMD);
+
+        if (acmd) {
+            read = index == 13 || index == 22 || index == 51;
+            data = read;
+        } else {
+            read = index == 6 || index == 17 || index == 18 || index == 30;
+            data = read || index == 24 || index == 25 || index == 27 ||
+                   index == 42;
+        }
+        multi = !acmd && (index == 18 || index == 25);
         no_cmd12 = false;
         /* Normal mode: CMD0, CMD4 and CMD15 have no response */
-        if (index == 0 || index == 4 || index == 15) {
+        if (!acmd && (index == 0 || index == 4 || index == 15)) {
             rtype = MODE_NO_RSP;
         }
-        qemu_log_mask(LOG_UNIMP, "%s: SD_CMD normal mode, CMD%u\n",
-                      __func__, index);
+        if (!acmd && (index == 19 || index == 56)) {
+            qemu_log_mask(LOG_UNIMP, "%s: CMD%u in normal mode: the data "
+                          "phase is not modelled\n", __func__, index);
+        }
     } else {
         data = FIELD_EX32(cmd, SD_CMD, DATA);
         read = FIELD_EX32(cmd, SD_CMD, READ);

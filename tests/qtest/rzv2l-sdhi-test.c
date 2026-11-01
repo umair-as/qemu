@@ -131,7 +131,8 @@ static uint32_t cmd(QTestState *qts, uint32_t base, uint32_t c, uint32_t arg)
 }
 
 /* SD card identification and selection (SD Physical Layer 4.2) */
-static void card_init(QTestState *qts, uint32_t base)
+/* Initialise the card and select it; returns its RCA in bits 31:16 */
+static uint32_t card_init(QTestState *qts, uint32_t base)
 {
     uint32_t ocr, rca;
     int i;
@@ -160,6 +161,7 @@ static void card_init(QTestState *qts, uint32_t base)
                     ==, 0xdeadbeef);
     rca = cmd(qts, base, CMD_R1 | 3, 0) & 0xffff0000;
     cmd(qts, base, CMD_R1B | 7, rca);
+    return rca;
 }
 
 static char *make_card(void)
@@ -372,6 +374,69 @@ static void test_pio(void)
     unlink(img);
 }
 
+/*
+ * Normal mode decodes the transfer from the command index (Table 40.8):
+ * ACMD51 (H'0073) reads the card's 8-byte SCR, ACMD13 (H'004D) the
+ * 64-byte SD status, CMD13 (H'000D, the same index without ACMD) has no
+ * data phase, CMD6 (H'0006) reads the 64-byte switch status and CMD17
+ * (H'0011) a block.
+ */
+static void test_normal_mode(void)
+{
+    g_autofree char *img = make_card();
+    QTestState *qts = start_with_card(img);
+    uint32_t b = SDHI0_BASE;
+    uint32_t rca;
+    uint64_t scr;
+
+    sdhi_release(qts, b);
+    rca = card_init(qts, b);
+
+    wr(qts, b, SD_SIZE, 8);
+    cmd(qts, b, 0x0037, rca);           /* CMD55 */
+    cmd(qts, b, 0x0073, 0);             /* ACMD51 */
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (BRE | CBSY), ==, BRE | CBSY);
+    wr(qts, b, SD_INFO2, ~BRE);
+    scr = qtest_readq(qts, b + SD_BUF0);
+    /* SCR[63:60] = 0: SCR structure version 1.0, the only one defined */
+    g_assert_cmphex(scr & 0xf0, ==, 0);
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO2, ==, INFO2);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & CBSY, ==, 0);
+
+    /* ACMD13 (H'004D): the 64-byte SD status */
+    wr(qts, b, SD_SIZE, 64);
+    cmd(qts, b, 0x0037, rca);
+    cmd(qts, b, 0x004d, 0);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (BRE | CBSY), ==, BRE | CBSY);
+    wr(qts, b, SD_INFO2, ~BRE);
+    for (int i = 0; i < 64; i += 8) {
+        qtest_readq(qts, b + SD_BUF0);
+    }
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO2, ==, INFO2);
+
+    cmd(qts, b, 0x000d, rca);           /* CMD13: no data phase */
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (BRE | CBSY), ==, 0);
+
+    /* CMD6 (H'0006): the 64-byte switch function status */
+    cmd(qts, b, 0x0006, 0x00fffff1);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (BRE | CBSY), ==, BRE | CBSY);
+    wr(qts, b, SD_INFO2, ~BRE);
+    for (int i = 0; i < 64; i += 8) {
+        qtest_readq(qts, b + SD_BUF0);
+    }
+    g_assert_cmphex(rd(qts, b, SD_INFO1) & INFO2, ==, INFO2);
+
+    /* CMD17 (H'0011): one block of SD_SIZE bytes */
+    wr(qts, b, SD_SIZE, 512);
+    cmd(qts, b, 0x0011, 0x400);
+    g_assert_cmphex(rd(qts, b, SD_INFO2) & (BRE | CBSY), ==, BRE | CBSY);
+    wr(qts, b, SD_INFO2, ~BRE);
+    g_assert_cmphex(qtest_readw(qts, b + SD_BUF0) & 0xff, ==,
+                    card_byte(0x400));
+    qtest_quit(qts);
+    unlink(img);
+}
+
 /* Built-in DMAC: CMD18 and CMD25 with SD_SECCNT and the automatic CMD12 */
 static void test_dma(void)
 {
@@ -494,6 +559,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-sdhi/soft-reset", test_soft_reset);
     qtest_add_func("/rzv2l-sdhi/card-pins-sdhi1", test_card_pins_sdhi1);
     qtest_add_func("/rzv2l-sdhi/pio", test_pio);
+    qtest_add_func("/rzv2l-sdhi/normal-mode", test_normal_mode);
     qtest_add_func("/rzv2l-sdhi/dma", test_dma);
     return g_test_run();
 }

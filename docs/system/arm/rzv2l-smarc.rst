@@ -41,7 +41,8 @@ Supported devices
  * SD/MMC host interfaces SDHI0 and SDHI1, with their built-in DMA
    controllers, for SD memory cards. Transfers complete at once, so the
    data timeout never fires; SDIO, HPI and the sampling clock controller
-   (bus tuning) are not modelled.
+   (bus tuning) are not modelled. Commands in normal mode take their
+   transfer from the command index.
  * Gigabit Ethernet interfaces ETH0 and ETH1, each with its Microchip
    KSZ9131 PHY at MDIO address 7, whose interrupt reaches the GIC through
    IRQ2 (ETH0) and IRQ3 (ETH1) of the IA55: the descriptor DMA
