@@ -30,6 +30,7 @@
 #include "target/arm/cpu.h"
 #include "hw/intc/arm_gicv3_common.h"
 #include "hw/misc/renesas_rzg2l_sysc.h"
+#include "hw/misc/renesas_rzg2l_otp.h"
 #include "hw/misc/renesas_rzv2l_cpg.h"
 #include "hw/char/renesas_rz_scifa.h"
 #include "hw/timer/renesas_rz_ostm.h"
@@ -76,6 +77,7 @@ struct R9A07G054State {
     ARMCPU cpu[R9A07G054_NUM_CPUS];
     GICv3State gic;
     RenesasRZG2LSysCState sysc;
+    RenesasRZG2LOTPState otp;
     CoreSightTSGenState syc;
     ArmTZC400State tzc[R9A07G054_NUM_TZC];
     RenesasRZV2LCPGState cpg;

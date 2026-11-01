@@ -20,6 +20,9 @@ Supported devices
    stored, not enforced; Non-secure accesses to their registers are
    refused with a bus error, as on the board
  * On-chip SRAM for the Cortex-M33 and the Cortex-A55
+ * One-time programmable memory (OTP): only the 128-bit chip ID, which
+   is unique to each device; the ``chip-id0`` to ``chip-id3`` properties
+   of ``renesas-rzg2l-otp`` set it (default 0, not a silicon value)
  * Serial ports SCIF0-4 (SCIFA), asynchronous mode: transmit, receive,
    loopback and the five interrupt lines.
    SCIF0 is the board console and takes the first ``-serial`` backend;

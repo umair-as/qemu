@@ -37,6 +37,7 @@ enum {
     R9A07G054_SYSC,
     R9A07G054_PFC,
     R9A07G054_IRQC,
+    R9A07G054_OTP,
     R9A07G054_OSTM0,
     R9A07G054_GIC_DIST,
     R9A07G054_GIC_REDIST,
@@ -49,6 +50,7 @@ static const hwaddr r9a07g054_memmap[] = {
     [R9A07G054_SYSC]        = 0x11020000,
     [R9A07G054_PFC]         = 0x11030000,
     [R9A07G054_IRQC]        = 0x110a0000,
+    [R9A07G054_OTP]         = 0x11860000,
     [R9A07G054_OSTM0]       = 0x12801000,   /* OSTMn at + n * 0x400 */
     [R9A07G054_GIC_DIST]    = 0x11900000,
     [R9A07G054_GIC_REDIST]  = 0x11940000,
@@ -184,6 +186,7 @@ static void r9a07g054_init(Object *obj)
                               "direct-boot");
 
     object_initialize_child(obj, "sysc", &s->sysc, TYPE_RENESAS_RZG2L_SYSC);
+    object_initialize_child(obj, "otp", &s->otp, TYPE_RENESAS_RZG2L_OTP);
     object_initialize_child(obj, "syc", &s->syc, TYPE_CORESIGHT_TSGEN);
     for (i = 0; i < R9A07G054_NUM_TZC; i++) {
         g_autofree char *name = g_strdup_printf("tzc%d", i);
@@ -406,6 +409,17 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysc), 0,
                     r9a07g054_memmap[R9A07G054_SYSC]);
+
+    /*
+     * OTP: only the CHIP Product ID, which OP-TEE reads to derive its
+     * hardware unique key. The ID is unique to each device; the model
+     * keeps the device's default, 0, which is not a silicon value.
+     */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->otp), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->otp), 0,
+                    r9a07g054_memmap[R9A07G054_OTP]);
 
     /* PFC */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->pfc), errp)) {

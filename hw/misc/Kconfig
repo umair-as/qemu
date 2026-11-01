@@ -257,6 +257,9 @@ config ARM_TZC400
 config RENESAS_RZG2L_SYSC
     bool
 
+config RENESAS_RZG2L_OTP
+    bool
+
 config RENESAS_RZV2L_CPG
     bool
 

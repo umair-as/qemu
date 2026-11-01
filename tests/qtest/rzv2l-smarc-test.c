@@ -330,6 +330,30 @@ static void test_stubs(void)
     qtest_quit(qts);
 }
 
+/*
+ * OTP: the CHIP Product ID, OTP words 0x50-0x53, reads directly at
+ * offsets 0x1140-0x114F (Security User's Manual R11AN1002EJ, CHIP
+ * Product ID (OTPCPID)): word 0x50 holds CHIPID[31:0], word 0x53
+ * CHIPID[127:96]. The value is unique to each device and set here.
+ */
+static void test_otp_chip_id(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc"
+        " -global renesas-rzg2l-otp.chip-id0=0x03020100"
+        " -global renesas-rzg2l-otp.chip-id1=0x07060504"
+        " -global renesas-rzg2l-otp.chip-id2=0x0b0a0908"
+        " -global renesas-rzg2l-otp.chip-id3=0x0f0e0d0c");
+
+    g_assert_cmphex(qtest_readl(qts, 0x11861140), ==, 0x03020100);
+    g_assert_cmphex(qtest_readl(qts, 0x11861144), ==, 0x07060504);
+    g_assert_cmphex(qtest_readl(qts, 0x11861148), ==, 0x0b0a0908);
+    g_assert_cmphex(qtest_readl(qts, 0x1186114c), ==, 0x0f0e0d0c);
+    /* The words either side are other OTP areas, not the chip ID */
+    g_assert_cmphex(qtest_readl(qts, 0x1186113c), ==, 0);
+    g_assert_cmphex(qtest_readl(qts, 0x11861150), ==, 0);
+    qtest_quit(qts);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -345,5 +369,6 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/syc", test_syc);
     qtest_add_func("/rzv2l-smarc/stubs", test_stubs);
 
+    qtest_add_func("/rzv2l-smarc/otp/chip-id", test_otp_chip_id);
     return g_test_run();
 }
