@@ -12,6 +12,10 @@
  * reports a failure (INT_STATUS reads 0) and a filter's gate opens or
  * closes as soon as it is requested.
  *
+ * With "secure-only" set, a Non-secure access to the programming
+ * interface is refused with a bus error. Accesses without attributes
+ * (qtest) are not refused.
+ *
  * Not modelled: the failure registers, the integration test registers
  * and the identification registers. An access to them, or to any other
  * offset, is logged and answered with a decode error.
@@ -27,6 +31,18 @@
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "hw/misc/arm_tzc400.h"
+
+static bool arm_tzc400_refused(ArmTZC400State *s, hwaddr offset,
+                               MemTxAttrs attrs, const char *what)
+{
+    if (!s->secure_only || attrs.secure || attrs.unspecified) {
+        return false;
+    }
+    qemu_log_mask(LOG_GUEST_ERROR,
+                  "arm_tzc400: Non-secure %s at offset 0x%" HWADDR_PRIx
+                  " refused\n", what, offset);
+    return true;
+}
 
 REG32(BUILD_CONFIG, 0x000)
     FIELD(BUILD_CONFIG, NO_OF_REGIONS, 0, 5)
@@ -81,6 +97,10 @@ static MemTxResult arm_tzc400_read(void *opaque, hwaddr offset,
 {
     ArmTZC400State *s = ARM_TZC400(opaque);
     uint64_t r;
+
+    if (arm_tzc400_refused(s, offset, attrs, "read")) {
+        return MEMTX_ERROR;
+    }
 
     switch (offset) {
     case A_BUILD_CONFIG:
@@ -139,6 +159,9 @@ static MemTxResult arm_tzc400_write(void *opaque, hwaddr offset,
 {
     ArmTZC400State *s = ARM_TZC400(opaque);
 
+    if (arm_tzc400_refused(s, offset, attrs, "write")) {
+        return MEMTX_ERROR;
+    }
     trace_arm_tzc400_write(offset, value, size);
 
     switch (offset) {
@@ -229,6 +252,7 @@ static void arm_tzc400_realize(DeviceState *dev, Error **errp)
 static const Property arm_tzc400_props[] = {
     DEFINE_PROP_UINT8("num-filters", ArmTZC400State, num_filters, 0),
     DEFINE_PROP_UINT8("addr-width", ArmTZC400State, addr_width, 0),
+    DEFINE_PROP_BOOL("secure-only", ArmTZC400State, secure_only, false),
 };
 
 static const VMStateDescription vmstate_arm_tzc400 = {

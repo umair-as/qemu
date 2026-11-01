@@ -380,12 +380,17 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->syc), 0,
                     r9a07g054_memmap[R9A07G054_SYC]);
 
-    /* TZC0-3: programmed by the boot firmware, not enforced */
+    /*
+     * TZC0-3: programmed by the boot firmware, not enforced. On the board
+     * a Non-secure read of their registers (U-Boot, BUILD_CONFIG of each)
+     * ends in a synchronous external abort.
+     */
     for (i = 0; i < R9A07G054_NUM_TZC; i++) {
         DeviceState *tzc = DEVICE(&s->tzc[i]);
 
         qdev_prop_set_uint8(tzc, "num-filters", r9a07g054_tzc[i].num_filters);
         qdev_prop_set_uint8(tzc, "addr-width", r9a07g054_tzc[i].addr_width);
+        qdev_prop_set_bit(tzc, "secure-only", true);
         if (!sysbus_realize(SYS_BUS_DEVICE(tzc), errp)) {
             return;
         }

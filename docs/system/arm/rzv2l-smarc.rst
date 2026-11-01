@@ -17,7 +17,8 @@ Supported devices
  * System counter (SYC, a CoreSight timestamp generator): the control
    registers firmware programs
  * TrustZone Address Space Controllers TZC0-3 (TZC-400): programming is
-   stored, not enforced
+   stored, not enforced; Non-secure accesses to their registers are
+   refused with a bus error, as on the board
  * On-chip SRAM for the Cortex-M33 and the Cortex-A55
  * Serial ports SCIF0-4 (SCIFA), asynchronous mode: transmit, receive,
    loopback and the five interrupt lines.

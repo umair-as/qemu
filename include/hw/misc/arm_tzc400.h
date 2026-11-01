@@ -40,6 +40,7 @@ struct ArmTZC400State {
     /* Properties */
     uint8_t num_filters;
     uint8_t addr_width;
+    bool secure_only;
 };
 
 #endif
