@@ -184,6 +184,8 @@ static void r9a07g054_init(Object *obj)
     object_initialize_child(obj, "cpg", &s->cpg, TYPE_RENESAS_RZV2L_CPG);
     object_property_add_alias(obj, "cpg-direct-boot", OBJECT(&s->cpg),
                               "direct-boot");
+    object_property_add_alias(obj, "cpg-bl2-boot", OBJECT(&s->cpg),
+                              "bl2-boot");
 
     object_initialize_child(obj, "sysc", &s->sysc, TYPE_RENESAS_RZG2L_SYSC);
     object_initialize_child(obj, "otp", &s->otp, TYPE_RENESAS_RZG2L_OTP);

@@ -335,7 +335,39 @@ static const struct {
     { 0x880, 0x0000000f },   /* RST_I2C */
     { 0x884, 0x00000001 },   /* RST_SCIF */
     { 0x898, 0x00000007 },   /* RST_GPIO */
-    /* Not read on the EVK: TF-A's cpg_setup sets the system-reset bits */
+    /* The board reads 0x8f: TF-A's cpg_setup sets the system-reset bits */
+    { 0xb14, 0x0000008f },   /* WDTRST_SEL */
+};
+
+/*
+ * Values TF-A's BL2 leaves in the registers that differ from their reset
+ * value (TF-A plat/renesas/rz/common/drivers/cpg.c, cpg_early_setup()
+ * and cpg_setup(), and the DDR clocks and resets of its DDR set-up: the
+ * clock-on, reset and divider tables, then
+ * WDTRST_SEL): the firmware values above without the ones the later boot
+ * stages set (the watchdog, USB, Ethernet, I2C and timer clocks and
+ * resets).
+ */
+static const struct {
+    uint16_t offset;
+    uint32_t value;
+} cpg_post_bl2[] = {
+    { 0x208, 0x00000100 },   /* PL3A_DDIV */
+    { 0x218, 0x00000022 },   /* PL2SDHI_DSEL */
+    { 0x21c, 0x00000001 },   /* PL4_DSEL */
+    { 0x408, 0x00000011 },   /* PL3_SSEL */
+    { 0x528, 0x00000001 },   /* CLKON_SYC */
+    { 0x54c, 0x00000003 },   /* CLKON_DDR */
+    { 0x550, 0x00000003 },   /* CLKON_SPI_MULTI */
+    { 0x554, 0x000000ff },   /* CLKON_SDHI */
+    { 0x584, 0x00000001 },   /* CLKON_SCIF */
+    { 0x598, 0x00000001 },   /* CLKON_GPIO */
+    { 0x828, 0x00000001 },   /* RST_SYC */
+    { 0x84c, 0x0000007f },   /* RST_DDR */
+    { 0x850, 0x00000001 },   /* RST_SPI */
+    { 0x854, 0x00000003 },   /* RST_SDHI */
+    { 0x884, 0x00000001 },   /* RST_SCIF */
+    { 0x898, 0x00000007 },   /* RST_GPIO */
     { 0xb14, 0x0000008f },   /* WDTRST_SEL */
 };
 
@@ -611,6 +643,12 @@ static void rzv2l_cpg_reset_hold(Object *obj, ResetType type)
             assert(r && (r->kind == CPG_PLAIN || r->kind == CPG_WEN));
             s->regs[idx] = cpg_post_firmware[i].value;
         }
+    } else if (s->bl2_boot) {
+        for (i = 0; i < ARRAY_SIZE(cpg_post_bl2); i++) {
+            r = cpg_lookup(cpg_post_bl2[i].offset, &idx);
+            assert(r && (r->kind == CPG_PLAIN || r->kind == CPG_WEN));
+            s->regs[idx] = cpg_post_bl2[i].value;
+        }
     }
 }
 
@@ -674,6 +712,7 @@ static const VMStateDescription vmstate_rzv2l_cpg = {
 
 static const Property rzv2l_cpg_props[] = {
     DEFINE_PROP_BOOL("direct-boot", RenesasRZV2LCPGState, direct_boot, false),
+    DEFINE_PROP_BOOL("bl2-boot", RenesasRZV2LCPGState, bl2_boot, false),
 };
 
 static void rzv2l_cpg_class_init(ObjectClass *klass, const void *data)

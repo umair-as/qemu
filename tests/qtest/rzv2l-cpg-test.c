@@ -57,6 +57,7 @@
 #define RST_SCIF            0x884
 #define RST_GPIO            0x898
 #define RST_DRP             0x8e8
+#define WDTRST_SEL          0xb14
 #define MON                 0x180   /* CLK_MON = CLK_ON + 0x180, likewise RST */
 #define MSTOP_MCPU1         0xb64
 #define MSTOP_MCPU2         0xb68
@@ -159,6 +160,40 @@ static const RegValue post_firmware_values[] = {
     { MSTOP_MCPU2, 0 },
 };
 
+/*
+ * With a boot loader as BL33, the values TF-A's BL2 leaves (its
+ * cpg_setup() tables in plat/renesas/rz/common/drivers/cpg.c): the clocks
+ * and resets of the SYC, DDR, SPI, SDHI, SCIF0 and GPIO on, the dividers
+ * set; the watchdog, timer, USB, Ethernet and I2C clocks and resets at
+ * their reset values (Table 7.5), which the later stages change.
+ */
+static const RegValue post_bl2_values[] = {
+    { PL3A_DDIV, 0x00000100 },
+    { PL2SDHI_DSEL, 0x00000022 },
+    { PL4_DSEL, 0x00000001 },
+    { PL3_SSEL, 0x00000011 },
+    { CLKON_SYC, 0x1 },          { CLKON_SYC + MON, 0x1 },
+    { CLKON_DDR, 0x3 },          { CLKON_DDR + MON, 0x3 },
+    { CLKON_SPI_MULTI, 0x3 },    { CLKON_SPI_MULTI + MON, 0x3 },
+    { CLKON_SDHI, 0xff },        { CLKON_SDHI + MON, 0xff },
+    { CLKON_SCIF, 0x1 },         { CLKON_SCIF + MON, 0x1 },
+    { CLKON_GPIO, 0x1 },         { CLKON_GPIO + MON, 0x1 },
+    { RST_SYC, 0x1 },            { RST_SYC + MON, 0 },
+    { RST_DDR, 0x7f },           { RST_DDR + MON, 0 },
+    { RST_SPI, 0x1 },            { RST_SPI + MON, 0 },
+    { RST_SDHI, 0x3 },           { RST_SDHI + MON, 0 },
+    { RST_SCIF, 0x1 },           { RST_SCIF + MON, 0x1e },
+    { RST_GPIO, 0x7 },           { RST_GPIO + MON, 0 },
+    { CLKON_GTM, 0x1 },          { CLKON_GTM + MON, 0x1 },
+    { CLKON_WDT, 0xc3 },         { CLKON_WDT + MON, 0x03 },
+    { RST_WDT, 0x9 },            { RST_WDT + MON, 0x6 },
+    { CLKON_USB, 0 },            { CLKON_USB + MON, 0 },
+    { RST_USB, 0 },              { RST_ETH, 0 },
+    { RST_I2C, 0 },
+    /* cpg_wdtrst_sel_setup(): WDTRSTSEL0-2 on top of the reset 0x88 */
+    { WDTRST_SEL, 0x8f },
+};
+
 static uint32_t cpg_read(QTestState *qts, uint32_t offset)
 {
     return qtest_readl(qts, CPG_BASE + offset);
@@ -210,6 +245,21 @@ static void test_direct_boot(void)
     check_values(qts, post_firmware_values, ARRAY_SIZE(post_firmware_values));
     qtest_quit(qts);
     unlink(kernel);
+}
+
+/* With a boot loader as BL33 (bl33=), the CPG starts as BL2 leaves it */
+static void test_bl2_boot(void)
+{
+    g_autofree char *bl33 = NULL;
+    int fd = g_file_open_tmp("rzv2l-cpg-XXXXXX", &bl33, NULL);
+    QTestState *qts;
+
+    g_assert(fd >= 0);
+    close(fd);
+    qts = qtest_initf("-machine rzv2l-smarc,bl33=%s", bl33);
+    check_values(qts, post_bl2_values, ARRAY_SIZE(post_bl2_values));
+    qtest_quit(qts);
+    unlink(bl33);
 }
 
 /*
@@ -416,6 +466,7 @@ int main(int argc, char **argv)
 
     qtest_add_func("/rzv2l-smarc/cpg/reset-values", test_reset_values);
     qtest_add_func("/rzv2l-smarc/cpg/direct-boot", test_direct_boot);
+    qtest_add_func("/rzv2l-smarc/cpg/bl2-boot", test_bl2_boot);
     qtest_add_func("/rzv2l-smarc/cpg/write-enable", test_write_enable);
     qtest_add_func("/rzv2l-smarc/cpg/monitors", test_monitors);
     qtest_add_func("/rzv2l-smarc/cpg/system-reset", test_system_reset);

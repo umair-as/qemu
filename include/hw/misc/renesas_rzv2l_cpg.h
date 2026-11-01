@@ -13,6 +13,8 @@
  *  + QOM property "direct-boot": start from the register values the
  *    boot firmware leaves behind, instead of the reset values, for a
  *    kernel that is loaded directly
+ *  + QOM property "bl2-boot": start from the register values TF-A's BL2
+ *    leaves behind, for a boot loader that is loaded directly
  *  + sysbus MMIO region 0: the CPG register bank
  *  + named GPIO outputs "wdt-presetn" 0-2: high while CPG_RST_WDT holds
  *    watchdog channel n in reset
@@ -68,6 +70,7 @@ struct RenesasRZV2LCPGState {
 
     /* Properties */
     bool direct_boot;
+    bool bl2_boot;
 };
 
 #endif
