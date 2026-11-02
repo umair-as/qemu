@@ -15,7 +15,7 @@
 #define GICR_IIDR       0x0004
 
 /* QEMU's default: ARM r0p0 with a zero ProductID */
-#define IIDR_DEFAULT    0x0000043b
+#define IIDR_DEFAULT    0x0000043b 
 /* Arm GIC-600 r1p6: ProductID 0x02, r1, p6, ARM (TRM 100336_0106_00) */
 #define IIDR_GIC600_R1P6 0x0201743b
 
