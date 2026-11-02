@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: rzv2l-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-test:
@@ -82,7 +82,7 @@ jobs:
         working-directory: build
         run: |
           set -euo pipefail
-          tests=()
+          tests=(tests/qtest/arm-gicv3-iidr-test)
           for source in "$GITHUB_WORKSPACE"/tests/qtest/rzv2l-*-test.c; do
             test -f "$source"
             tests+=("tests/qtest/$(basename "$source" .c)")
