@@ -36,7 +36,7 @@ static void check_iidr(const char *extra_args, uint32_t expected)
 
 static void test_iidr_default(void)
 {
-    check_iidr("", IIDR_DEFAULT);
+    check_iidr("", IIDR_DEFAULT ^ 1);
 }
 
 static void test_iidr_property(void)
