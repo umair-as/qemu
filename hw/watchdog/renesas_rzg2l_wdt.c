@@ -344,9 +344,14 @@ static void wdt_clk(void *opaque, int n, int level)
         return;
     }
     if (stop) {
-        /* Hold the count reached so far */
-        uint64_t count = s->count_at_epoch + wdt_ticks(s, now);
+        uint64_t count;
 
+        /* An overflow already due happens before the clock stops */
+        if (wdt_ticks(s, now) >= wdt_next_event(s)) {
+            wdt_timer_cb(s);
+        }
+        /* Hold the count reached so far */
+        count = s->count_at_epoch + wdt_ticks(s, now);
         s->clk_stopped = true;
         wdt_restart_count(s, now, count);
     } else {

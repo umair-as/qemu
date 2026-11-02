@@ -292,6 +292,35 @@ static void test_clock_stopped(void)
     qtest_quit(qts);
 }
 
+/*
+ * With WDT0_CLK stopped before the start, WDTEN starts nothing: the count
+ * holds at WDTTIM; and an INTDISP clear while the clock is stopped
+ * restarts the count at 0, still held (sections 21.1.1, 21.3.4).
+ */
+static void test_clock_stopped_start(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    cpg_wr(qts, CPG_WDTRST_SEL, WDTRST_SEL_RESET | 0x1);
+    cpg_wr(qts, CPG_CLKON_WDT, (0x2 << 16) | 0x0);  /* WDT0_CLK off */
+    wdt_wr(qts, 0, WDTSET, 0);
+    wdt_wr(qts, 0, WDTTIM, 0x1000);
+    wdt_wr(qts, 0, WDTCNT, 1);
+    qtest_clock_step(qts, 3 * CYCLE_NS);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTCNT), ==, 1);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTTIM), ==, 0x1000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 0);
+    g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0);
+
+    /* Clear while stopped: the count restarts at 0 and holds there */
+    wdt_wr(qts, 0, WDTINT, 1);
+    qtest_clock_step(qts, 3 * CYCLE_NS);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTTIM), ==, 0);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 0);
+    g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0);
+    qtest_quit(qts);
+}
+
 static void test_presetn(void)
 {
     QTestState *qts = qtest_init("-machine rzv2l-smarc");
@@ -321,6 +350,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-wdt/reset-values", test_reset_values);
     qtest_add_func("/rzv2l-wdt/count", test_count);
     qtest_add_func("/rzv2l-wdt/clock-stopped", test_clock_stopped);
+    qtest_add_func("/rzv2l-wdt/clock-stopped-start", test_clock_stopped_start);
     qtest_add_func("/rzv2l-wdt/first-overflow", test_first_overflow);
     qtest_add_func("/rzv2l-wdt/reset-request", test_reset_request);
     qtest_add_func("/rzv2l-wdt/masked-request", test_masked_request);
