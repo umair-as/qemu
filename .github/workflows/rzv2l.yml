@@ -1,0 +1,119 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+name: RZ/V2L
+
+on:
+  pull_request:
+    branches: [rzv2l-dev]
+  push:
+    branches: [rzv2l-dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rzv2l-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test:
+    name: Build and qtests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+      CCACHE_BASEDIR: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Record revisions
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          mkdir -p build/ci-logs
+          git rev-parse HEAD > build/ci-logs/tested-sha.txt
+          printf 'PR head: %s\nPR base: %s\n' "$PR_HEAD" "$PR_BASE" > build/ci-logs/pr.txt
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build python3-venv python3-pip \
+            pkg-config libglib2.0-dev libpixman-1-dev libslirp-dev \
+            zlib1g-dev ccache
+
+      - uses: actions/cache@v5
+        with:
+          path: .ccache
+          key: rzv2l-ubuntu24-gcc-v1-${{ github.sha }}
+          restore-keys: rzv2l-ubuntu24-gcc-v1-
+
+      - name: Check patch style
+        if: github.event_name == 'pull_request'
+        env:
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -o pipefail
+          base=$(git merge-base "$PR_BASE" "$PR_HEAD")
+          if test "$base" != "$PR_HEAD"; then
+            scripts/checkpatch.pl --no-signoff --branch "$base..$PR_HEAD" \
+              > build/ci-logs/checkpatch.txt 2>&1 || {
+                tail -80 build/ci-logs/checkpatch.txt
+                exit 1
+              }
+          fi
+
+      - name: Configure
+        working-directory: build
+        run: |
+          ../configure --target-list=aarch64-softmmu --disable-docs \
+            --enable-slirp --cc='ccache gcc' > ci-logs/configure.txt 2>&1 || {
+              tail -80 ci-logs/configure.txt
+              exit 1
+            }
+
+      - name: Build and run RZ/V2L qtests
+        working-directory: build
+        run: |
+          set -euo pipefail
+          tests=(tests/qtest/arm-gicv3-iidr-test)
+          for source in "$GITHUB_WORKSPACE"/tests/qtest/rzv2l-*-test.c; do
+            test -f "$source"
+            tests+=("tests/qtest/$(basename "$source" .c)")
+          done
+          ninja qemu-system-aarch64 "${tests[@]}" > ci-logs/build.txt 2>&1 || {
+            tail -80 ci-logs/build.txt
+            exit 1
+          }
+          export QTEST_QEMU_BINARY="$PWD/qemu-system-aarch64"
+          failed=0
+          for test in "${tests[@]}"; do
+            timeout 120 "$test" > "ci-logs/$(basename "$test").txt" 2>&1 || {
+              tail -80 "ci-logs/$(basename "$test").txt"
+              failed=1
+            }
+          done
+          ./qemu-system-aarch64 --version > ci-logs/version.txt
+          tar -czf rzv2l-binaries.tar.gz qemu-system-aarch64 "${tests[@]}"
+          sha256sum rzv2l-binaries.tar.gz > ci-logs/binaries.sha256
+          exit "$failed"
+
+      - name: Cache statistics
+        if: always()
+        run: ccache --show-stats > build/ci-logs/ccache.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rzv2l-${{ github.sha }}-${{ github.run_attempt }}
+          retention-days: 14
+          path: |
+            build/ci-logs/
+            build/rzv2l-binaries.tar.gz
+            build/meson-logs/
