@@ -33,8 +33,11 @@
  *   is applied).
  * - The watchdog: CPG_RST_WDT drives the PRESETN line of each WDT
  *   channel (named GPIO output "wdt-presetn", high while the reset is
- *   applied). A reset request from a channel (named GPIO input
- *   "wdtrstb", a level) resets the system while its CPG_WDTRST_SEL
+ *   applied), and CPG_CLKON_WDT bit 2n + 1 its counter clock WDTn_CLK
+ *   (named GPIO output "wdt-clk", high while the clock runs; section
+ *   7.2.4.44; the bus clock, bit 2n, has no modelled effect). A reset
+ *   request from a channel (named GPIO input "wdtrstb", a level) resets
+ *   the system while its CPG_WDTRST_SEL
  *   system-reset bit (2:0) is set, also when the bit is set after the
  *   request: CPG_WDTOVF_RST then records the channel. The flag is read
  *   after the release from the reset it caused (section 7.2.4.182), so
@@ -386,6 +389,7 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
 
 #define CPG_RST_CA55        0x800
 #define CPG_RST_WDT         0x848
+#define CPG_CLKON_WDT       0x548
 #define CPG_RST_SDHI        0x854
 #define CPG_RST_ETH         0x87c
 #define CPG_WDTRST_SEL      0xb14
@@ -421,6 +425,17 @@ static void rzv2l_cpg_update_wdt(RenesasRZV2LCPGState *s)
 
     for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
         qemu_set_irq(s->wdt_presetn[n], !(rst & BIT(n)));
+    }
+}
+
+/* WDTn_CLK of each watchdog channel: runs while CLK_ON bit 2n + 1 is 1 */
+static void rzv2l_cpg_update_wdt_clk(RenesasRZV2LCPGState *s)
+{
+    uint32_t on = s->regs[cpg_index[CPG_CLKON_WDT / 4]];
+    int n;
+
+    for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
+        qemu_set_irq(s->wdt_clk[n], !!(on & BIT(2 * n + 1)));
     }
 }
 
@@ -599,6 +614,8 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
         rzv2l_cpg_pchannel(s, offset == CPG_CORE1_PCHCTL, s->regs[idx]);
     } else if (offset == CPG_RST_WDT) {
         rzv2l_cpg_update_wdt(s);
+    } else if (offset == CPG_CLKON_WDT) {
+        rzv2l_cpg_update_wdt_clk(s);
     } else if (offset == CPG_RST_SDHI) {
         rzv2l_cpg_update_sdhi(s);
     } else if (offset == CPG_RST_ETH) {
@@ -655,6 +672,7 @@ static void rzv2l_cpg_reset_hold(Object *obj, ResetType type)
 static void rzv2l_cpg_reset_exit(Object *obj, ResetType type)
 {
     rzv2l_cpg_update_wdt(RENESAS_RZV2L_CPG(obj));
+    rzv2l_cpg_update_wdt_clk(RENESAS_RZV2L_CPG(obj));
     rzv2l_cpg_update_sdhi(RENESAS_RZV2L_CPG(obj));
     rzv2l_cpg_update_eth(RENESAS_RZV2L_CPG(obj));
 }
@@ -681,6 +699,8 @@ static void rzv2l_cpg_init(Object *obj)
                           RENESAS_RZV2L_CPG_MMIO_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
     qdev_init_gpio_out_named(DEVICE(obj), s->wdt_presetn, "wdt-presetn",
+                             RENESAS_RZV2L_CPG_NUM_WDT);
+    qdev_init_gpio_out_named(DEVICE(obj), s->wdt_clk, "wdt-clk",
                              RENESAS_RZV2L_CPG_NUM_WDT);
     qdev_init_gpio_out_named(DEVICE(obj), s->sdhi_rst, "sdhi-rst",
                              RENESAS_RZV2L_CPG_NUM_SDHI);

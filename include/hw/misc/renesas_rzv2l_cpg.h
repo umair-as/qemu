@@ -18,6 +18,8 @@
  *  + sysbus MMIO region 0: the CPG register bank
  *  + named GPIO outputs "wdt-presetn" 0-2: high while CPG_RST_WDT holds
  *    watchdog channel n in reset
+ *  + named GPIO outputs "wdt-clk" 0-2: high while CPG_CLKON_WDT supplies
+ *    watchdog channel n's counter clock WDTn_CLK (bit 2n + 1)
  *  + named GPIO outputs "sdhi-rst" 0-1: high while CPG_RST_SDHI holds
  *    SDHI channel n in reset (its IXRST line is low)
  *  + named GPIO outputs "eth-rst" 0-1: high while CPG_RST_ETH holds
@@ -61,6 +63,7 @@ struct RenesasRZV2LCPGState {
     uint32_t wdtovf;
     bool wdtrstb[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq wdt_presetn[RENESAS_RZV2L_CPG_NUM_WDT];
+    qemu_irq wdt_clk[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq sdhi_rst[RENESAS_RZV2L_CPG_NUM_SDHI];
     qemu_irq eth_rst[RENESAS_RZV2L_CPG_NUM_ETH];
     /* Cortex-A55 cores: P-Channel mode ON, and running */
