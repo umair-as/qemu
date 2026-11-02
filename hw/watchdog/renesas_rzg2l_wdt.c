@@ -25,6 +25,11 @@
  *   value, and the model reads it as "any bit set").
  * The counter runs on the virtual clock at WDTn_CLK and is computed when
  * WDTTIM is read; a QEMU timer fires only at the next overflow.
+ * The counter operates with WDTn_CLK (section 21.1.1): while the clock
+ * controller stops that clock, the count holds and no overflow comes;
+ * when it runs again, counting resumes from the held value (the hold and
+ * resume are an inference from section 21.1.1; the board, with the clock
+ * stopped by Linux, does not reset).
  *
  * Not modelled: CPU parity error inputs (PESR, PEER and PEPO are stored
  * only), the debug pause input, and the synchronisation delay between a
@@ -104,6 +109,9 @@ static uint32_t wdt_count(RenesasRZG2LWDTState *s)
     if (!s->running) {
         return s->wdttim;
     }
+    if (s->clk_stopped) {
+        return s->count_at_epoch;
+    }
     return s->count_at_epoch +
            wdt_ticks(s, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL));
 }
@@ -117,12 +125,16 @@ static void wdt_update(RenesasRZG2LWDTState *s)
     qemu_set_irq(s->wdtrstb, s->overflow_reset || (forced && !s->pecr));
 }
 
-/* Restart the count from @count at @now */
+/* Restart the count from @count at @now; it holds while WDTn_CLK stops */
 static void wdt_restart_count(RenesasRZG2LWDTState *s, int64_t now,
                               uint64_t count)
 {
     s->epoch_ns = now;
     s->count_at_epoch = count;
+    if (s->clk_stopped) {
+        timer_del(s->timer);
+        return;
+    }
     timer_mod(s->timer, wdt_time_of(s, wdt_next_event(s)));
 }
 
@@ -316,6 +328,33 @@ static void wdt_presetn(void *opaque, int n, int level)
     }
 }
 
+/* WDTn_CLK from the clock controller: @level 1 while the clock runs */
+static void wdt_clk(void *opaque, int n, int level)
+{
+    RenesasRZG2LWDTState *s = RENESAS_RZG2L_WDT(opaque);
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    bool stop = !level;
+
+    if (stop == s->clk_stopped) {
+        return;
+    }
+    trace_renesas_rzg2l_wdt_clk(level);
+    if (!s->running) {
+        s->clk_stopped = stop;
+        return;
+    }
+    if (stop) {
+        /* Hold the count reached so far */
+        uint64_t count = s->count_at_epoch + wdt_ticks(s, now);
+
+        s->clk_stopped = true;
+        wdt_restart_count(s, now, count);
+    } else {
+        s->clk_stopped = false;
+        wdt_restart_count(s, now, s->count_at_epoch);
+    }
+}
+
 static void wdt_reset_hold(Object *obj, ResetType type)
 {
     wdt_reset_state(RENESAS_RZG2L_WDT(obj));
@@ -338,6 +377,7 @@ static void wdt_init(Object *obj)
     sysbus_init_irq(sbd, &s->irq_perrout);
     qdev_init_gpio_out_named(DEVICE(obj), &s->wdtrstb, "wdtrstb", 1);
     qdev_init_gpio_in_named(DEVICE(obj), wdt_presetn, "presetn", 1);
+    qdev_init_gpio_in_named(DEVICE(obj), wdt_clk, "clk", 1);
 }
 
 static void wdt_realize(DeviceState *dev, Error **errp)
@@ -362,8 +402,8 @@ static void wdt_finalize(Object *obj)
 
 static const VMStateDescription vmstate_wdt = {
     .name = TYPE_RENESAS_RZG2L_WDT,
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_BOOL(running, RenesasRZG2LWDTState),
         VMSTATE_UINT32(wdtset, RenesasRZG2LWDTState),
@@ -378,6 +418,7 @@ static const VMStateDescription vmstate_wdt = {
         VMSTATE_UINT64(count_at_epoch, RenesasRZG2LWDTState),
         VMSTATE_BOOL(overflow_reset, RenesasRZG2LWDTState),
         VMSTATE_BOOL(in_reset, RenesasRZG2LWDTState),
+        VMSTATE_BOOL(clk_stopped, RenesasRZG2LWDTState),
         VMSTATE_TIMER_PTR(timer, RenesasRZG2LWDTState),
         VMSTATE_END_OF_LIST()
     }

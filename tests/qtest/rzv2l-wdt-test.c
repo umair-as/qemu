@@ -28,6 +28,7 @@ static const uint32_t wdt_base[] = { 0x12800800, 0x12800c00, 0x12800400 };
 #define PEPO                0x20
 
 #define CPG_BASE            0x11010000
+#define CPG_CLKON_WDT       0x548
 #define CPG_RST_WDT         0x848
 #define CPG_WDTOVF_RST      0xb10
 #define CPG_WDTRST_SEL      0xb14
@@ -256,6 +257,41 @@ static void test_parity_force(void)
     qtest_quit(qts);
 }
 
+/*
+ * The counter operates with WDTn_CLK (section 21.1.1), CPG_CLKON_WDT bit
+ * 2n + 1 (section 7.2.4.44): with WDT0_CLK stopped and the bus clock
+ * (bit 0) left on, the count holds, no overflow comes and no reset; with
+ * the clock back, counting resumes from the held value. The board, whose
+ * Linux stops this clock, does not reset with WDT0 unfed.
+ */
+static void test_clock_stopped(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+    uint32_t held;
+    uint64_t left_ns;
+
+    cpg_wr(qts, CPG_WDTRST_SEL, WDTRST_SEL_RESET | 0x1);
+    wdt0_start_shortest(qts);
+    qtest_clock_step(qts, CYCLE_NS / 2);
+    cpg_wr(qts, CPG_CLKON_WDT, (0x2 << 16) | 0x0);  /* WDT0_CLK off */
+    held = wdt_rd(qts, 0, WDTTIM);
+    g_assert_cmpuint(held, >, CYCLE_CLOCKS / 2 - 48);
+    g_assert_cmpuint(held, <, CYCLE_CLOCKS / 2 + 48);
+
+    qtest_clock_step(qts, 3 * CYCLE_NS);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTTIM), ==, held);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 0);
+    g_assert_cmphex(cpg_rd(qts, CPG_WDTOVF_RST), ==, 0);
+
+    cpg_wr(qts, CPG_CLKON_WDT, (0x2 << 16) | 0x2);  /* WDT0_CLK on */
+    left_ns = (CYCLE_CLOCKS - held) * 1000000000ull / 24000000;
+    qtest_clock_step(qts, left_ns - 1000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 0);
+    qtest_clock_step(qts, 2000);
+    g_assert_cmphex(wdt_rd(qts, 0, WDTINT), ==, 1);
+    qtest_quit(qts);
+}
+
 static void test_presetn(void)
 {
     QTestState *qts = qtest_init("-machine rzv2l-smarc");
@@ -284,6 +320,7 @@ int main(int argc, char **argv)
 
     qtest_add_func("/rzv2l-wdt/reset-values", test_reset_values);
     qtest_add_func("/rzv2l-wdt/count", test_count);
+    qtest_add_func("/rzv2l-wdt/clock-stopped", test_clock_stopped);
     qtest_add_func("/rzv2l-wdt/first-overflow", test_first_overflow);
     qtest_add_func("/rzv2l-wdt/reset-request", test_reset_request);
     qtest_add_func("/rzv2l-wdt/masked-request", test_masked_request);

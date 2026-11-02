@@ -480,6 +480,9 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
         qdev_connect_gpio_out_named(DEVICE(&s->cpg), "wdt-presetn", i,
                                     qdev_get_gpio_in_named(DEVICE(sbd),
                                                            "presetn", 0));
+        qdev_connect_gpio_out_named(DEVICE(&s->cpg), "wdt-clk", i,
+                                    qdev_get_gpio_in_named(DEVICE(sbd),
+                                                           "clk", 0));
     }
 
     /* SDHI0-1: the built-in DMAC sees the system address space */

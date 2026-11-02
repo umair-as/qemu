@@ -57,3 +57,4 @@ renesas_rzg2l_wdt_read(uint64_t offset, uint64_t value) "offset 0x%" PRIx64 " ->
 renesas_rzg2l_wdt_write(uint64_t offset, uint64_t value) "offset 0x%" PRIx64 " <- 0x%" PRIx64
 renesas_rzg2l_wdt_overflow(bool intdisp, bool reset) "overflow: INTDISP %d, reset request %d"
 renesas_rzg2l_wdt_presetn(int level) "held in reset %d"
+renesas_rzg2l_wdt_clk(int level) "WDTn_CLK running %d"

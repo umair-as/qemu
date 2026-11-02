@@ -20,6 +20,8 @@
  *    the clock controller decides whether it resets the system
  *  + named GPIO input "presetn": high while the clock controller holds
  *    the channel in reset (its PRESETN line is low)
+ *  + named GPIO input "clk": high while the counter clock WDTn_CLK runs;
+ *    unconnected, the clock runs
  */
 
 #ifndef HW_WATCHDOG_RENESAS_RZG2L_WDT_H
@@ -62,6 +64,8 @@ struct RenesasRZG2LWDTState {
     bool overflow_reset;
     /* Held in reset by the clock controller */
     bool in_reset;
+    /* WDTn_CLK is stopped: a running counter holds count_at_epoch */
+    bool clk_stopped;
 
     /* Properties */
     uint32_t freq_hz;
