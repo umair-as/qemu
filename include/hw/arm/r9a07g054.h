@@ -21,6 +21,9 @@
  *    the board sets their NIC and "phy" link before realizing the
  *    SoC, and wires their "phy-link" input
  *  + public child "irqc": its "irq" inputs 0-7 are the IRQ0-7 pins
+ *  + public child "rpc": the SPI Multi I/O Bus Controller; the board puts
+ *    its flash on the child bus "spi" and wires the flash's chip select
+ *    to sysbus IRQ 1
  *  + the SoC maps its devices into the system address space at realize
  */
 
@@ -41,6 +44,7 @@
 #include "hw/gpio/renesas_rzg2l_pfc.h"
 #include "hw/sd/renesas_sdhi.h"
 #include "hw/net/renesas_gbeth.h"
+#include "hw/ssi/renesas_rzv2l_rpc.h"
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
 #include "qemu/units.h"
@@ -86,6 +90,7 @@ struct R9A07G054State {
     RenesasRZG2LWDTState wdt[R9A07G054_NUM_WDT];
     RenesasSDHIState sdhi[R9A07G054_NUM_SDHI];
     RenesasGbEthState eth[R9A07G054_NUM_ETH];
+    RenesasRZV2LRPCState rpc;
     RenesasRZG2LIRQCState irqc;
     RenesasRZG2LPFCState pfc;
     MemoryRegion sram_mcpu;

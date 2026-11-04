@@ -34,6 +34,7 @@
 #include "hw/core/boards.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/sd/sd.h"
+#include "hw/ssi/ssi.h"
 #include "hw/net/ksz9131_phy.h"
 #include "net/net.h"
 #include "system/blockdev.h"
@@ -246,6 +247,33 @@ static void rzv2l_smarc_attach_sd(RZV2LSmarcState *s)
                                qdev_get_child_bus(DEVICE(&s->soc), name),
                                &error_fatal);
     }
+}
+
+/*
+ * The module's QSPI flash, a Micron MT25QU512ABB on QSPI0 (module UM
+ * section 4.2.1, Table 4.1): -drive if=mtd,index=0 holds its 64 MiB.
+ * Without one the flash starts erased and keeps what is written until
+ * QEMU exits. Its non-volatile configuration register starts at the
+ * part's factory value, FFFFh: default dummy cycles, which the part's
+ * SFDP tables describe and Linux programs (10 for Quad I/O Fast Read).
+ * The m25p80 default fixes 8 for every read. The register is not kept
+ * in the drive: each QEMU start begins at FFFFh. The flash's RESET#
+ * pin, which the SoC's QSPI_RESET# drives, is not connected in the
+ * model.
+ */
+static void rzv2l_smarc_attach_flash(RZV2LSmarcState *s)
+{
+    DriveInfo *di = drive_get(IF_MTD, 0, 0);
+    DeviceState *flash = qdev_new("mt25qu512a");
+
+    if (di) {
+        qdev_prop_set_drive_err(flash, "drive", blk_by_legacy_dinfo(di),
+                                &error_fatal);
+    }
+    qdev_prop_set_uint32(flash, "nonvolatile-cfg", 0xffff);
+    qdev_realize_and_unref(flash, BUS(s->soc.rpc.spi), &error_fatal);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->soc.rpc), 1,
+                       qdev_get_gpio_in_named(flash, SSI_GPIO_CS, 0));
 }
 
 /* The PHYs, and the NICs of the Ethernet channels */
@@ -524,6 +552,7 @@ static void rzv2l_smarc_init(MachineState *machine)
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
     rzv2l_smarc_wire_eth(s);
     rzv2l_smarc_attach_sd(s);
+    rzv2l_smarc_attach_flash(s);
 
     memory_region_add_subregion(get_system_memory(), R9A07G054_DDR_BASE,
                                 machine->ram);

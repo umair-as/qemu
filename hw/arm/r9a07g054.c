@@ -8,8 +8,9 @@
  * Two Cortex-A55 cores, a GIC-600 (modelled by the GICv3), the Clock
  * Pulse Generator, the System Controller identification registers, the
  * five SCIFA serial ports, the three OS timers, the three watchdog
- * timers, the pin function controller and the interrupt control unit's
- * registers. A few blocks
+ * timers, the pin function controller, the interrupt control unit's
+ * registers, the SD/MMC host interfaces, the Gigabit Ethernet channels
+ * and the SPI Multi I/O Bus Controller. A few blocks
  * that a kernel probes are stubbed (see r9a07g054_unimp). Everything
  * else in the address space is left unmapped, so guest accesses to
  * blocks that are not modelled yet fault instead of reading as zero.
@@ -103,6 +104,14 @@ static const hwaddr r9a07g054_eth_base[R9A07G054_NUM_ETH] = {
 };
 #define R9A07G054_ETH0_SPI      84
 
+/*
+ * SPI Multi I/O Bus Controller: registers, the SPI multi I/O bus space
+ * (manual Tables 25.2, 25.3) and SPIHF (Table 8.2)
+ */
+#define R9A07G054_RPC_BASE      0x10060000
+#define R9A07G054_RPC_BUS_BASE  0x20000000
+#define R9A07G054_RPC_SPI       41
+
 /* IRQ0-7 are SPI 1-8 (Table 8.2) */
 #define R9A07G054_IRQ0_SPI      1
 /*
@@ -166,9 +175,7 @@ static const struct {
     { "adc",            0x10059000, 0x400,   false },
     { "usb0-func",      0x11c60000, 0x10000, false },
     { "ddr-memc",       0x11410000, 0x10000, false },
-    { "rpc-if",         0x10060000, 0x10000, false },
     { "rpc-if-wbuf",    0x10070000, 0x10000, false },
-    { "rpc-if-dirmap",  0x20000000, 0x10000000, false },
 };
 
 static void r9a07g054_init(Object *obj)
@@ -243,6 +250,8 @@ static void r9a07g054_init(Object *obj)
 
         object_initialize_child(obj, name, &s->eth[i], TYPE_RENESAS_GBETH);
     }
+
+    object_initialize_child(obj, "rpc", &s->rpc, TYPE_RENESAS_RZV2L_RPC);
 }
 
 /*
@@ -533,6 +542,21 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
                                     qdev_get_gpio_in_named(DEVICE(sbd),
                                                            "reset", 0));
     }
+    /* SPI Multi I/O Bus Controller */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->rpc), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->rpc), 0, R9A07G054_RPC_BASE);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->rpc), 1, R9A07G054_RPC_BUS_BASE);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->rpc), 0,
+                       qdev_get_gpio_in(gicdev, R9A07G054_RPC_SPI));
+    qdev_connect_gpio_out_named(DEVICE(&s->cpg), "spi-rst", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->rpc),
+                                                       "rst", 0));
+    qdev_connect_gpio_out_named(DEVICE(&s->cpg), "spi-clk", 0,
+                                qdev_get_gpio_in_named(DEVICE(&s->rpc),
+                                                       "clk", 0));
+
     /*
      * On-chip SRAM (manual Table 5.1): the boot ROM loads BL2 into it, and
      * BL2 leaves its parameters for BL31 there
