@@ -980,11 +980,16 @@ static uint8_t numonyx_extract_cfg_dummy_bytes(Flash *s)
     dummy_bits = extract32(s->volatile_cfg, 4, 4);
 
     /*
-     * The default nubmer of dummy cycles is only related to the SPI
-     * protocol mode. For QSPI it is 10, otherwise it is 8.
+     * The default number of dummy cycles is 10 in the Quad I/O protocol
+     * and for Quad I/O Fast Read in the other protocols, otherwise 8. The
+     * parts' SFDP basic parameter tables give the same defaults: the 1-4-4
+     * fast read has 1 mode clock and 9 wait states, the other fast reads
+     * 8 clocks in all.
      */
     if (dummy_bits == 0x0 || dummy_bits == 0xf) {
-        dummy_bits = (mode == MODE_QIO) ? 10 : 8;
+        dummy_bits = (mode == MODE_QIO ||
+                      s->cmd_in_progress == QIOR ||
+                      s->cmd_in_progress == QIOR4) ? 10 : 8;
     }
 
     /*
