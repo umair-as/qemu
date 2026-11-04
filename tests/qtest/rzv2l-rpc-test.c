@@ -322,7 +322,9 @@ static void test_manual_read(void)
  * by SSLKP between them: 4 bytes as a 32-bit word; 2 bytes as a 32-bit
  * word with the data in the top bytes, then at their own size; 1 byte at
  * its own size, then as a 32-bit word with the data in the top byte. The
- * flash then holds the bytes in order.
+ * flash then holds the bytes in order. The manual gives only the
+ * transfer-size writes; the 32-bit ones pin the model's rule for them
+ * (the data in the top bytes, as the SoC's firmware writes it).
  */
 static void test_manual_write(void)
 {
@@ -343,6 +345,7 @@ static void test_manual_write(void)
     g_assert_cmphex(rd(qts, CMNSR), ==, CMNSR_SSLF | CMNSR_TEND);
 
     qtest_writew(qts, RPC_BASE + SMWDR0, 0x8877);
+    g_assert_cmphex(qtest_readw(qts, RPC_BASE + SMWDR0), ==, 0x8877);
     manual(qts, 0, 0, EN_SPIDE(0xc), SMCR_SPIWE | SMCR_SSLKP);
 
     qtest_writeb(qts, RPC_BASE + SMWDR0, 0x99);
@@ -374,6 +377,8 @@ static void test_normal_read(void)
     ext_mode(qts, FL_READ, 0);
     g_assert_cmphex(qtest_readl(qts, RPC_BUS + PAT1 + 0x20), ==,
                     pat32(PAT1 + 0x20));
+    /* QSPI0_SSL is negated after each normal read (section 25.5.10) */
+    g_assert_cmphex(rd(qts, CMNSR), ==, CMNSR_TEND);
     g_assert_cmphex(qtest_readb(qts, RPC_BUS + PAT1 + 0x123), ==,
                     pat(PAT1 + 0x123));
     g_assert_cmphex(qtest_readq(qts, RPC_BUS + PAT1 + 0x40), ==,
