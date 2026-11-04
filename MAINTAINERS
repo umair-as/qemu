@@ -1047,6 +1047,7 @@ F: hw/arm/rzv2l-smarc.c
 F: hw/char/renesas_rz_scifa.c
 F: hw/misc/renesas_rzg2l_otp.c
 F: hw/misc/renesas_rzg2l_sysc.c
+F: hw/misc/renesas_rzv2l_ddr.c
 F: hw/misc/arm_tzc400.c
 F: hw/net/ksz9131_phy.c
 F: hw/net/renesas_gbeth.c
@@ -1056,12 +1057,14 @@ F: include/hw/arm/r9a07g054.h
 F: include/hw/char/renesas_rz_scifa.h
 F: include/hw/misc/renesas_rzg2l_otp.h
 F: include/hw/misc/renesas_rzg2l_sysc.h
+F: include/hw/misc/renesas_rzv2l_ddr.h
 F: include/hw/misc/arm_tzc400.h
 F: include/hw/net/ksz9131_phy.h
 F: include/hw/net/renesas_gbeth.h
 F: include/hw/ssi/renesas_rzv2l_rpc.h
 F: include/hw/timer/coresight_tsgen.h
 F: docs/system/arm/rzv2l-smarc.rst
+F: tests/qtest/rzv2l-ddr-test.c
 F: tests/qtest/rzv2l-gbeth-test.c
 F: tests/qtest/rzv2l-rpc-test.c
 F: tests/qtest/rzv2l-scifa-test.c

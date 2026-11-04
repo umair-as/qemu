@@ -35,6 +35,7 @@
 #include "hw/misc/renesas_rzg2l_sysc.h"
 #include "hw/misc/renesas_rzg2l_otp.h"
 #include "hw/misc/renesas_rzv2l_cpg.h"
+#include "hw/misc/renesas_rzv2l_ddr.h"
 #include "hw/char/renesas_rz_scifa.h"
 #include "hw/timer/renesas_rz_ostm.h"
 #include "hw/timer/coresight_tsgen.h"
@@ -91,6 +92,7 @@ struct R9A07G054State {
     RenesasSDHIState sdhi[R9A07G054_NUM_SDHI];
     RenesasGbEthState eth[R9A07G054_NUM_ETH];
     RenesasRZV2LRPCState rpc;
+    RenesasRZV2LDDRState ddr;
     RenesasRZG2LIRQCState irqc;
     RenesasRZG2LPFCState pfc;
     MemoryRegion sram_mcpu;
