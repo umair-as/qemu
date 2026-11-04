@@ -184,3 +184,20 @@ feed ``/dev/watchdog0`` is reset.
   $ qemu-system-aarch64 -M rzv2l-smarc,bl32=tee-raw.bin,bl33=u-boot.bin \
       -bios bl31.bin \
       -drive if=sd,index=0,format=raw,file=sd.img
+
+In boot mode 3 or 4 (``boot-mode=3``, ``4``: serial flash) and without
+``-bios`` and ``-kernel``, the machine does what the boot ROM does: at
+each reset it reads the loader size block at the start of the QSPI
+flash, checks its signature, copies the loader (the board's TF-A BL2,
+with the boot parameter block TF-A's ``bptool`` writes) from flash
+offset 0x200 into on-chip RAM at 0x12000, and starts the first core
+there at EL3. The clock controller and the SPI controller keep their
+reset values; BL2 sets them up. A flash the ROM could not boot from (no
+drive, no signature, a loader size of 0 or above 0x1d000 bytes) stops
+QEMU with an error; the ROM's fallback to SCIF download mode is not
+modelled.
+
+.. code-block:: bash
+
+  $ qemu-system-aarch64 -M rzv2l-smarc,boot-mode=3 \
+      -drive if=mtd,index=0,format=raw,file=spi.img
