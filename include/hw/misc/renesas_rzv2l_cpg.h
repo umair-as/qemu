@@ -24,6 +24,10 @@
  *    SDHI channel n in reset (its IXRST line is low)
  *  + named GPIO outputs "eth-rst" 0-1: high while CPG_RST_ETH holds
  *    Gigabit Ethernet channel n in reset
+ *  + named GPIO output "spi-rst": high while CPG_RST_SPI holds the SPI
+ *    Multi I/O Bus Controller in reset
+ *  + named GPIO output "spi-clk": high while CPG_CLKON_SPI_MULTI supplies
+ *    both clocks of the SPI Multi I/O Bus Controller
  *  + named GPIO inputs "wdtrstb" 0-2: the reset request of watchdog
  *    channel n, active high
  *  + named GPIO outputs "ca55-run" 0-1: set when Cortex-A55 core n is
@@ -66,6 +70,8 @@ struct RenesasRZV2LCPGState {
     qemu_irq wdt_clk[RENESAS_RZV2L_CPG_NUM_WDT];
     qemu_irq sdhi_rst[RENESAS_RZV2L_CPG_NUM_SDHI];
     qemu_irq eth_rst[RENESAS_RZV2L_CPG_NUM_ETH];
+    qemu_irq spi_rst;
+    qemu_irq spi_clk;
     /* Cortex-A55 cores: P-Channel mode ON, and running */
     bool ca55_on[RENESAS_RZV2L_CPG_NUM_CA55];
     bool ca55_run[RENESAS_RZV2L_CPG_NUM_CA55];

@@ -53,11 +53,17 @@ Supported devices
    checksum offload. Transfers complete at once. Flow control, the
    hardware MDIO controller, energy-efficient Ethernet, the receive
    filters, wake-up and ARP offload are not modelled.
+ * SPI Multi I/O Bus Controller, with the module's Micron MT25QU512A
+   QSPI flash: manual mode and the external address space read mode with
+   its read cache. Transfers complete at once and move the same bytes
+   with 1 or 4 data lines, in SDR or DDR. HyperFlash, Octal-SPI, two
+   flash memories, the write buffer and the high-speed DMA mode are not
+   supported and fail with a bus error.
 
 Missing devices
 ---------------
 
-I2C, USB, the QSPI controller, the display, CAN-FD,
+I2C, USB, the display, CAN-FD,
 the ADC, the thermal sensor, the DMA controller and the DDR memory
 controller (which reads as a board without ECC) are stubs: they log
 every access and read as zero, so their drivers fail when they probe.
@@ -100,6 +106,19 @@ names the cards ``mmcblk0`` and ``mmcblk1`` in every boot.
 
   $ qemu-system-aarch64 -M rzv2l-smarc ... \
       -drive if=sd,index=0,format=raw,file=sd.img
+
+QSPI flash
+----------
+
+``-drive if=mtd,index=0`` holds the 64 MiB of the QSPI flash on the
+SMARC module. Without it the flash starts erased (every byte 0xFF) and
+keeps what the guest writes until QEMU exits. The flash's non-volatile
+configuration register starts at its factory value on every QEMU start.
+
+.. code-block:: bash
+
+  $ qemu-system-aarch64 -M rzv2l-smarc ... \
+      -drive if=mtd,index=0,format=raw,file=qspi.img
 
 Networking
 ----------

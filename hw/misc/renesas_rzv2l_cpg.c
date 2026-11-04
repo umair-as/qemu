@@ -31,6 +31,11 @@
  * - CPG_RST_ETH drives the reset (ETHn_RST_HW_N) of each Gigabit
  *   Ethernet channel (named GPIO output "eth-rst", high while the reset
  *   is applied).
+ * - CPG_RST_SPI bit 0 drives the reset of the SPI Multi I/O Bus
+ *   Controller (named GPIO output "spi-rst", high while the reset is
+ *   applied; section 7.2.4.123), and CPG_CLKON_SPI_MULTI bits 1:0
+ *   (SPI_CLK, SPI_CLK2) its clocks (named GPIO output "spi-clk", high
+ *   while both run; section 7.2.4.46).
  * - The watchdog: CPG_RST_WDT drives the PRESETN line of each WDT
  *   channel (named GPIO output "wdt-presetn", high while the reset is
  *   applied), and CPG_CLKON_WDT bit 2n + 1 its counter clock WDTn_CLK
@@ -392,6 +397,8 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
 #define CPG_CLKON_WDT       0x548
 #define CPG_RST_SDHI        0x854
 #define CPG_RST_ETH         0x87c
+#define CPG_CLKON_SPI_MULTI 0x550
+#define CPG_RST_SPI         0x850
 #define CPG_WDTRST_SEL      0xb14
 #define CPG_WDTOVF_MASK     0x7
 #define CPG_CORE0_PCHCTL    0xb3c
@@ -459,6 +466,16 @@ static void rzv2l_cpg_update_eth(RenesasRZV2LCPGState *s)
     for (n = 0; n < RENESAS_RZV2L_CPG_NUM_ETH; n++) {
         qemu_set_irq(s->eth_rst[n], !(rst & BIT(n)));
     }
+}
+
+/* The SPI Multi I/O Bus Controller: held while RST_SPI bit 0 is 0 */
+static void rzv2l_cpg_update_spi(RenesasRZV2LCPGState *s)
+{
+    uint32_t rst = s->regs[cpg_index[CPG_RST_SPI / 4]];
+    uint32_t on = s->regs[cpg_index[CPG_CLKON_SPI_MULTI / 4]];
+
+    qemu_set_irq(s->spi_rst, !(rst & BIT(0)));
+    qemu_set_irq(s->spi_clk, (on & 0x3) == 0x3);
 }
 
 /* A Cortex-A55 core runs while its P-Channel is ON and its resets released */
@@ -620,6 +637,8 @@ static MemTxResult rzv2l_cpg_write(void *opaque, hwaddr offset,
         rzv2l_cpg_update_sdhi(s);
     } else if (offset == CPG_RST_ETH) {
         rzv2l_cpg_update_eth(s);
+    } else if (offset == CPG_RST_SPI || offset == CPG_CLKON_SPI_MULTI) {
+        rzv2l_cpg_update_spi(s);
     } else if (offset == CPG_WDTRST_SEL) {
         for (n = 0; n < RENESAS_RZV2L_CPG_NUM_WDT; n++) {
             if ((s->regs[idx] & ~old & BIT(n)) && s->wdtrstb[n]) {
@@ -675,6 +694,7 @@ static void rzv2l_cpg_reset_exit(Object *obj, ResetType type)
     rzv2l_cpg_update_wdt_clk(RENESAS_RZV2L_CPG(obj));
     rzv2l_cpg_update_sdhi(RENESAS_RZV2L_CPG(obj));
     rzv2l_cpg_update_eth(RENESAS_RZV2L_CPG(obj));
+    rzv2l_cpg_update_spi(RENESAS_RZV2L_CPG(obj));
 }
 
 /* The reset request of watchdog channel @n (section 7.2.4.183) */
@@ -706,6 +726,8 @@ static void rzv2l_cpg_init(Object *obj)
                              RENESAS_RZV2L_CPG_NUM_SDHI);
     qdev_init_gpio_out_named(DEVICE(obj), s->eth_rst, "eth-rst",
                              RENESAS_RZV2L_CPG_NUM_ETH);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->spi_rst, "spi-rst", 1);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->spi_clk, "spi-clk", 1);
     qdev_init_gpio_in_named(DEVICE(obj), rzv2l_cpg_wdtrstb, "wdtrstb",
                             RENESAS_RZV2L_CPG_NUM_WDT);
     qdev_init_gpio_out_named(DEVICE(obj), s->ca55_run_out, "ca55-run",

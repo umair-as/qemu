@@ -16,6 +16,7 @@
 #define M25P80_SFDP_MAX_SIZE  (1 << 24)
 
 uint8_t m25p80_sfdp_n25q256a(uint32_t addr);
+uint8_t m25p80_sfdp_mt25qu512a(uint32_t addr);
 uint8_t m25p80_sfdp_mt35xu01g(uint32_t addr);
 uint8_t m25p80_sfdp_mt35xu02g(uint32_t addr);
 

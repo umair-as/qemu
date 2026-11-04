@@ -268,6 +268,9 @@ static const FlashPartInfo known_devices[] = {
    { INFO("n25q512a",    0x20ba20,      0,  64 << 10, 1024, ER_4K) },
     { INFO("n25q512ax3",  0x20ba20,  0x1000,  64 << 10, 1024, ER_4K) },
     { INFO("mt25ql512ab", 0x20ba20, 0x1044, 64 << 10, 1024, ER_4K | ER_32K) },
+    { INFO6("mt25qu512a", 0x20bb20, 0x104400, 64 << 10, 1024,
+            ER_4K | ER_32K),
+      .sfdp_read = m25p80_sfdp_mt25qu512a },
     { INFO_STACKED("mt35xu01g", 0x2c5b1b, 0x104100, 128 << 10, 1024,
                    ER_4K | ER_32K, 2),
                    .sfdp_read = m25p80_sfdp_mt35xu01g },
@@ -980,11 +983,16 @@ static uint8_t numonyx_extract_cfg_dummy_bytes(Flash *s)
     dummy_bits = extract32(s->volatile_cfg, 4, 4);
 
     /*
-     * The default nubmer of dummy cycles is only related to the SPI
-     * protocol mode. For QSPI it is 10, otherwise it is 8.
+     * The default number of dummy cycles is 10 in the Quad I/O protocol
+     * and for Quad I/O Fast Read in the other protocols, otherwise 8. The
+     * parts' SFDP basic parameter tables give the same defaults: the 1-4-4
+     * fast read has 1 mode clock and 9 wait states, the other fast reads
+     * 8 clocks in all.
      */
     if (dummy_bits == 0x0 || dummy_bits == 0xf) {
-        dummy_bits = (mode == MODE_QIO) ? 10 : 8;
+        dummy_bits = (mode == MODE_QIO ||
+                      s->cmd_in_progress == QIOR ||
+                      s->cmd_in_progress == QIOR4) ? 10 : 8;
     }
 
     /*
