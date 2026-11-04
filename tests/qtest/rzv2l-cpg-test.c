@@ -86,7 +86,7 @@ static const RegValue reset_values[] = {
     /* PLL1 = 24 MHz x 100 / 2 = 1200 MHz (7.2.4.2-3, p.255-259) */
     { SAMPLL1_CLK1, 0x00001901 },
     { SAMPLL1_CLK2, 0x00180601 },
-    /* PLL4 and PLL6 (Table 7.5 p.246; monitors 7.2.4.4 p.258-259) */
+    /* PLL4 and PLL6 (Table 7.5 p.246; monitors 7.2.4.4 p.259) */
     { SAMPLL4_STBY, 0x00000004 },
     { SAMPLL4_CLK1, 0x00003203 },
     { SAMPLL4_CLK2, 0x00082400 },
@@ -284,6 +284,13 @@ static void test_bl2_boot(void)
     close(fd);
     qts = qtest_initf("-machine rzv2l-smarc,bl33=%s", bl33);
     check_values(qts, post_bl2_values, ARRAY_SIZE(post_bl2_values));
+    /* PLL4 and PLL6 as BL2's cpg_pll_setup() leaves them (not measured) */
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_STBY), ==, 0x00000005);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_CLK1), ==, 0xfae13203);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_CLK2), ==, 0x00081000);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_MON), ==, 0x00000011);
+    g_assert_cmphex(cpg_read(qts, SAMPLL6_STBY), ==, 0x00000001);
+    g_assert_cmphex(cpg_read(qts, SAMPLL6_MON), ==, 0x00000011);
     qtest_quit(qts);
     unlink(bl33);
 }

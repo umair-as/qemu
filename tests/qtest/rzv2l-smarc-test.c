@@ -170,7 +170,10 @@ static void test_sysc_accctl(void)
         g_assert_cmphex(qtest_readl(qts, SYSC_BASE + r[i].offset), ==,
                         r[i].reset);
     }
-    /* TF-A's BL2 value for SYS_SLVACCCTL7 (plat_security.c) */
+    /*
+     * A value stored at 0x118 (SYS_SLVACCCTL6) reads back there and not
+     * at 0x114 (SYS_SLVACCCTL5), the address Table 6.1 repeats
+     */
     qtest_writel(qts, SYSC_BASE + 0x118, 0x00000008);
     g_assert_cmphex(qtest_readl(qts, SYSC_BASE + 0x118), ==, 0x00000008);
     g_assert_cmphex(qtest_readl(qts, SYSC_BASE + 0x114), ==, 0);
