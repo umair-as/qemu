@@ -59,13 +59,18 @@ Supported devices
    with 1 or 4 data lines, in SDR or DDR. HyperFlash, Octal-SPI, two
    flash memories, the write buffer and the high-speed DMA mode are not
    supported and fail with a bus error.
+ * DDR memory controller and PHY, as a stub for the boot firmware's DDR
+   set-up: the registers TF-A's BL2 writes store their values, and its
+   initialisation, mode register writes, low-power commands and training
+   passes complete at once. Nothing is trained or timed; ECC_ENABLE
+   reads as a board without ECC. Other registers, other access sizes and
+   other commands fail with a bus error.
 
 Missing devices
 ---------------
 
 I2C, USB, the display, CAN-FD,
-the ADC, the thermal sensor, the DMA controller and the DDR memory
-controller (which reads as a board without ECC) are stubs: they log
+the ADC, the thermal sensor and the DMA controller are stubs: they log
 every access and read as zero, so their drivers fail when they probe.
 Every other on-chip block is missing. The serial ports have no modem
 lines, break or error detection, and do not enforce the baud rate.
@@ -195,7 +200,8 @@ there at EL3. The clock controller and the SPI controller keep their
 reset values; BL2 sets them up. A flash the ROM could not boot from (no
 drive, no signature, a loader size of 0 or above 0x1d000 bytes) stops
 QEMU with an error; the ROM's fallback to SCIF download mode is not
-modelled.
+modelled. BL2 then sets up the DDR, loads its images from the flash and
+starts BL31.
 
 .. code-block:: bash
 

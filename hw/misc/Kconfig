@@ -263,6 +263,9 @@ config RENESAS_RZG2L_OTP
 config RENESAS_RZV2L_CPG
     bool
 
+config RENESAS_RZV2L_DDR
+    bool
+
 config XLNX_VERSAL_TRNG
     bool
 

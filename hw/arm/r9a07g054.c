@@ -35,6 +35,8 @@ enum {
     R9A07G054_SCIF0,
     R9A07G054_SYC,
     R9A07G054_CPG,
+    R9A07G054_DDR_PHY,
+    R9A07G054_DDR_MC,
     R9A07G054_SYSC,
     R9A07G054_PFC,
     R9A07G054_IRQC,
@@ -48,6 +50,8 @@ static const hwaddr r9a07g054_memmap[] = {
     [R9A07G054_SCIF0]       = 0x1004b800,   /* SCIFn at + n * 0x400 */
     [R9A07G054_SYC]         = 0x11000000,
     [R9A07G054_CPG]         = 0x11010000,
+    [R9A07G054_DDR_PHY]     = 0x11400000,
+    [R9A07G054_DDR_MC]      = 0x11410000,
     [R9A07G054_SYSC]        = 0x11020000,
     [R9A07G054_PFC]         = 0x11030000,
     [R9A07G054_IRQC]        = 0x110a0000,
@@ -145,9 +149,7 @@ static const struct {
  * every access. Reads return 0, or with retain_writes the last value
  * written: the DMA controller driver writes its channel registers at
  * probe and only reads them back to run a transfer; the USB PHY control
- * driver sets and clears reset bits with read-modify-writes. The boot
- * loader reads the DDR memory controller's ECC enable bits to choose its
- * device tree: 0 is the board without ECC.
+ * driver sets and clears reset bits with read-modify-writes.
  */
 static const struct {
     const char *name;
@@ -174,7 +176,6 @@ static const struct {
     { "canfd",          0x10050000, 0x8000,  false },
     { "adc",            0x10059000, 0x400,   false },
     { "usb0-func",      0x11c60000, 0x10000, false },
-    { "ddr-memc",       0x11410000, 0x10000, false },
     { "rpc-if-wbuf",    0x10070000, 0x10000, false },
 };
 
@@ -252,6 +253,7 @@ static void r9a07g054_init(Object *obj)
     }
 
     object_initialize_child(obj, "rpc", &s->rpc, TYPE_RENESAS_RZV2L_RPC);
+    object_initialize_child(obj, "ddr", &s->ddr, TYPE_RENESAS_RZV2L_DDR);
 }
 
 /*
@@ -556,6 +558,19 @@ static void r9a07g054_realize(DeviceState *dev, Error **errp)
     qdev_connect_gpio_out_named(DEVICE(&s->cpg), "spi-clk", 0,
                                 qdev_get_gpio_in_named(DEVICE(&s->rpc),
                                                        "clk", 0));
+
+    /*
+     * DDR memory controller and PHY: the boot firmware sets them up;
+     * the boot loader reads the controller's ECC enable bits to choose
+     * its device tree
+     */
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->ddr), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ddr), 0,
+                    r9a07g054_memmap[R9A07G054_DDR_MC]);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ddr), 1,
+                    r9a07g054_memmap[R9A07G054_DDR_PHY]);
 
     /*
      * On-chip SRAM (manual Table 5.1): the boot ROM loads BL2 into it, and

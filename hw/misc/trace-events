@@ -308,6 +308,14 @@ renesas_rzv2l_cpg_write(const char *name, uint64_t offset, uint64_t data) "%s (0
 renesas_rzv2l_cpg_wdt_reset(int channel, bool enabled) "WDT%d reset request, system reset %d"
 renesas_rzv2l_cpg_ca55_run(int core, bool run) "Cortex-A55 core %d run %d"
 
+# renesas_rzv2l_ddr.c
+renesas_rzv2l_ddr_mc_read(uint64_t offset, uint32_t data) "controller 0x%" PRIx64 " -> 0x%08x"
+renesas_rzv2l_ddr_mc_write(uint64_t offset, uint32_t data) "controller 0x%" PRIx64 " <- 0x%08x"
+renesas_rzv2l_ddr_phy_read(uint64_t offset, uint32_t data) "PHY 0x%" PRIx64 " -> 0x%08x"
+renesas_rzv2l_ddr_phy_write(uint64_t offset, uint32_t data) "PHY 0x%" PRIx64 " <- 0x%08x"
+renesas_rzv2l_ddr_event(const char *what) "%s"
+renesas_rzv2l_ddr_lp(unsigned cmd, unsigned state) "low-power command 0x%x, state 0x%x"
+
 # iotkit-sysctl.c
 iotkit_sysctl_read(uint64_t offset, uint64_t data, unsigned size) "IoTKit SysCtl read: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
 iotkit_sysctl_write(uint64_t offset, uint64_t data, unsigned size) "IoTKit SysCtl write: offset 0x%" PRIx64 " data 0x%" PRIx64 " size %u"
