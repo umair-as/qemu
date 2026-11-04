@@ -19,6 +19,14 @@
 
 #define SAMPLL1_CLK1        0x004
 #define SAMPLL1_CLK2        0x008
+#define SAMPLL4_STBY        0x010
+#define SAMPLL4_CLK1        0x014
+#define SAMPLL4_CLK2        0x018
+#define SAMPLL4_MON         0x01c
+#define SAMPLL6_STBY        0x020
+#define SAMPLL6_CLK1        0x024
+#define SAMPLL6_CLK2        0x028
+#define SAMPLL6_MON         0x02c
 #define PL1_DDIV            0x200
 #define PL2_DDIV            0x204
 #define PL3A_DDIV           0x208
@@ -38,6 +46,7 @@
 #define CLKON_DDR           0x54c
 #define CLKON_SPI_MULTI     0x550
 #define CLKON_SDHI          0x554
+#define CLKON_SRC           0x574
 #define CLKON_USB           0x578
 #define CLKON_SCIF          0x584
 #define CLKON_GPIO          0x598
@@ -50,6 +59,7 @@
 #define RST_WDT             0x848
 #define RST_DDR             0x84c
 #define RST_SPI             0x850
+#define RST_SRC             0x874
 #define RST_SDHI            0x854
 #define RST_USB             0x878
 #define RST_ETH             0x87c
@@ -76,6 +86,15 @@ static const RegValue reset_values[] = {
     /* PLL1 = 24 MHz x 100 / 2 = 1200 MHz (7.2.4.2-3, p.255-259) */
     { SAMPLL1_CLK1, 0x00001901 },
     { SAMPLL1_CLK2, 0x00180601 },
+    /* PLL4 and PLL6 (Table 7.5 p.246; monitors 7.2.4.4 p.258-259) */
+    { SAMPLL4_STBY, 0x00000004 },
+    { SAMPLL4_CLK1, 0x00003203 },
+    { SAMPLL4_CLK2, 0x00082400 },
+    { SAMPLL4_MON, 0 },
+    { SAMPLL6_STBY, 0 },
+    { SAMPLL6_CLK1, 0x00003e83 },
+    { SAMPLL6_CLK2, 0x00082d02 },
+    { SAMPLL6_MON, 0 },
     /* Table 7.5 writes H'0000 000x; the bit table (7.2.4.16 p.274) 00b */
     { PL1_DDIV, 0 },
     { PL2_DDIV, 0 },
@@ -113,6 +132,13 @@ static const RegValue reset_values[] = {
     { RST_SCIF, 0 },             { RST_SCIF + MON, 0x1f },
     { RST_GPIO, 0 },             { RST_GPIO + MON, 0x7 },
     { RST_DRP, 0 },              { RST_DRP + MON, 0x1 },
+    /*
+     * The sampling rate converter: deleted from the manual, set by the
+     * boot firmware; as its siblings (an inference): clock off, reset
+     * applied
+     */
+    { CLKON_SRC, 0 },            { CLKON_SRC + MON, 0 },
+    { RST_SRC, 0 },              { RST_SRC + MON, 0x1 },
     { MSTOP_MCPU2, 0 },
     { MSTOP_REG0, 0 },
     { OTHERFUNC1, 0 },
@@ -260,6 +286,72 @@ static void test_bl2_boot(void)
     check_values(qts, post_bl2_values, ARRAY_SIZE(post_bl2_values));
     qtest_quit(qts);
     unlink(bl33);
+}
+
+/*
+ * PLL4 and PLL6 (7.2.4.1-7.2.4.4): STBY changes only under its
+ * write-enable bits; CLK1 and CLK2 are plain registers whose upper bits
+ * are data; the monitor reports normal mode (RESETB, bit 0) and lock
+ * (LOCK, bit 4) while STBY.RESETB is 1. With -kernel the PLLs start as
+ * TF-A's BL2 leaves them (its cpg_pll_setup(); not read on the EVK).
+ */
+static void test_pll(void)
+{
+    g_autofree char *kernel = NULL;
+    int fd;
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    /* Without its write enable RESETB stays 0 */
+    cpg_write(qts, SAMPLL4_STBY, 0x00000001);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_STBY), ==, 0x00000004);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_MON), ==, 0);
+    /* BL2's start: RESETB set, SSCG_EN untouched */
+    cpg_write(qts, SAMPLL4_STBY, 0x00010001);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_STBY), ==, 0x00000005);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_MON), ==, 0x00000011);
+    g_assert_cmphex(cpg_read(qts, SAMPLL6_MON), ==, 0);
+    /* Standby again */
+    cpg_write(qts, SAMPLL4_STBY, 0x00010000);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_MON), ==, 0);
+    /* SSCG_MODE (5:4) under one enable (bit 20) */
+    cpg_write(qts, SAMPLL6_STBY, 0x00100030);
+    g_assert_cmphex(cpg_read(qts, SAMPLL6_STBY), ==, 0x00000030);
+    /* CLK1 bits 31:16 are DIV_K data; CLK2 bits 31:24 reserved */
+    cpg_write(qts, SAMPLL4_CLK1, 0xfae13203);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_CLK1), ==, 0xfae13203);
+    cpg_write(qts, SAMPLL4_CLK2, 0xffffffff);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_CLK2), ==, 0x00ff3f07);
+    qtest_quit(qts);
+
+    fd = g_file_open_tmp("rzv2l-cpg-XXXXXX", &kernel, NULL);
+    g_assert(fd >= 0);
+    close(fd);
+    qts = qtest_initf("-machine rzv2l-smarc -kernel %s", kernel);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_STBY), ==, 0x00000005);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_CLK1), ==, 0xfae13203);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_CLK2), ==, 0x00081000);
+    g_assert_cmphex(cpg_read(qts, SAMPLL4_MON), ==, 0x00000011);
+    g_assert_cmphex(cpg_read(qts, SAMPLL6_STBY), ==, 0x00000001);
+    g_assert_cmphex(cpg_read(qts, SAMPLL6_MON), ==, 0x00000011);
+    qtest_quit(qts);
+    unlink(kernel);
+}
+
+/* The sampling rate converter's clock and reset, as BL2 sets them */
+static void test_src(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    cpg_write(qts, CLKON_SRC, WEN(0x1) | 0x1);
+    g_assert_cmphex(cpg_read(qts, CLKON_SRC + MON), ==, 0x1);
+    cpg_write(qts, RST_SRC, WEN(0x1) | 0x1);
+    g_assert_cmphex(cpg_read(qts, RST_SRC + MON), ==, 0);
+    /* BL2's entries (cpg.c cpg_clk_on_tbl, cpg_reset_tbl): off, reset */
+    cpg_write(qts, CLKON_SRC, 0x00010000);
+    g_assert_cmphex(cpg_read(qts, CLKON_SRC + MON), ==, 0);
+    cpg_write(qts, RST_SRC, 0x00010000);
+    g_assert_cmphex(cpg_read(qts, RST_SRC + MON), ==, 0x1);
+    qtest_quit(qts);
 }
 
 /*
@@ -468,6 +560,8 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/cpg/direct-boot", test_direct_boot);
     qtest_add_func("/rzv2l-smarc/cpg/bl2-boot", test_bl2_boot);
     qtest_add_func("/rzv2l-smarc/cpg/write-enable", test_write_enable);
+    qtest_add_func("/rzv2l-smarc/cpg/pll", test_pll);
+    qtest_add_func("/rzv2l-smarc/cpg/src", test_src);
     qtest_add_func("/rzv2l-smarc/cpg/monitors", test_monitors);
     qtest_add_func("/rzv2l-smarc/cpg/system-reset", test_system_reset);
     qtest_add_func("/rzv2l-smarc/cpg/pchannel", test_pchannel);
