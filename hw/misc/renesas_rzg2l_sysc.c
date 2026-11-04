@@ -17,6 +17,16 @@
  *    does not mask it; a 0 write clears a flag. The flags' interrupt to
  *    the Cortex-M33 (SYS_LPM_INT) and the Cortex-M33's responses are not
  *    modelled: there is no Cortex-M33 software.
+ *  - the master and slave access control registers SYS_MSTACCCTL0-5 and
+ *    SYS_SLVACCCTL0-15 (6.3.1 to 6.3.22): stored, with the reset values
+ *    of Table 6.1, and not enforced. Every bit is stored (the reserved
+ *    bits are not masked). Only Secure accesses are taken: on the board a
+ *    Non-secure read of SYS_MSTACCCTL0 or SYS_SLVACCCTL0 aborts, and the
+ *    model refuses one to any of them with a bus error. Table 6.1 has no
+ *    row for SYS_SLVACCCTL9, 11 and 15, which the boot firmware reads and
+ *    writes back; they reset to 0 here. It lists SYS_SLVACCCTL6 at
+ *    H'0114, the address of SYS_SLVACCCTL5; the model, as the firmware,
+ *    puts it at H'0118.
  * The other SYSC registers have non-zero reset values (manual Table 6.1),
  * so reading them as zero would be wrong: any other offset is answered
  * with a decode error instead, which the guest sees as an external
@@ -34,6 +44,8 @@
 #include "migration/vmstate.h"
 #include "hw/misc/renesas_rzg2l_sysc.h"
 
+REG32(SYS_MSTACCCTL0, 0x000)
+REG32(SYS_SLVACCCTL0, 0x100)
 REG32(SYS_CA55_CFG_RVAL0, 0x858)
 REG32(SYS_CA55_CFG_RVAH0, 0x85c)
 REG32(SYS_CA55_CFG_RVAL1, 0x860)
@@ -65,6 +77,27 @@ REG32(SYS_LP_CTL6, 0xd18)
                           R_SYS_LP_CTL1_CA55SLEEP_ACK_MASK | \
                           R_SYS_LP_CTL1_CM33SLEEP_ACK_MASK)
 
+/* Table 6.1: SYS_MSTACCCTL0-5, SYS_SLVACCCTL0-15 (9, 11, 15 not listed) */
+static const uint32_t accctl_reset[RENESAS_RZG2L_SYSC_NUM_MSTACC +
+                                   RENESAS_RZG2L_SYSC_NUM_SLVACC] = {
+    0x00aaaa00, 0xaaaaaaaa, 0x00aaaaaa, 0x00aaaaaa, 0xaaaa00aa, 0xaaaa00aa,
+    0x0aaaaaa0, 0x0800c0aa, 0x00000002, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+};
+
+/* The access control register at @offset, or -1 */
+static int rzg2l_sysc_accctl(hwaddr offset)
+{
+    if (offset < A_SYS_MSTACCCTL0 + 4 * RENESAS_RZG2L_SYSC_NUM_MSTACC) {
+        return offset / 4;
+    }
+    if (offset >= A_SYS_SLVACCCTL0 &&
+        offset < A_SYS_SLVACCCTL0 + 4 * RENESAS_RZG2L_SYSC_NUM_SLVACC) {
+        return RENESAS_RZG2L_SYSC_NUM_MSTACC + (offset - A_SYS_SLVACCCTL0) / 4;
+    }
+    return -1;
+}
+
 /* Boot modes 0-5 are defined (manual Table 4.1); 6 and 7 are reserved */
 #define RZG2L_SYSC_BOOT_MODE_MAX 5
 
@@ -85,7 +118,20 @@ static MemTxResult rzg2l_sysc_read(void *opaque, hwaddr offset,
                                    MemTxAttrs attrs)
 {
     RenesasRZG2LSysCState *s = RENESAS_RZG2L_SYSC(opaque);
+    int acc = rzg2l_sysc_accctl(offset);
     uint64_t r;
+
+    if (acc >= 0) {
+        if (!attrs.secure && !attrs.unspecified) {
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: Non-secure read at offset 0x%"
+                          HWADDR_PRIx " refused\n", __func__, offset);
+            return MEMTX_ERROR;
+        }
+        r = s->accctl[acc];
+        trace_renesas_rzg2l_sysc_read(offset, r, size);
+        *data = r;
+        return MEMTX_OK;
+    }
 
     switch (offset) {
     case A_SYS_LSI_MODE:
@@ -134,10 +180,21 @@ static MemTxResult rzg2l_sysc_write(void *opaque, hwaddr offset,
                                     MemTxAttrs attrs)
 {
     RenesasRZG2LSysCState *s = RENESAS_RZG2L_SYSC(opaque);
+    int acc = rzg2l_sysc_accctl(offset);
     uint32_t raised;
     int core;
 
     trace_renesas_rzg2l_sysc_write(offset, value, size);
+
+    if (acc >= 0) {
+        if (!attrs.secure && !attrs.unspecified) {
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: Non-secure write at offset 0x%"
+                          HWADDR_PRIx " refused\n", __func__, offset);
+            return MEMTX_ERROR;
+        }
+        s->accctl[acc] = value;
+        return MEMTX_OK;
+    }
 
     switch (offset) {
     case A_SYS_CA55_CFG_RVAL0:
@@ -251,12 +308,13 @@ static void rzg2l_sysc_reset_hold(Object *obj, ResetType type)
     s->lp_ctl2 = 0;
     s->lp_ctl5 = 0;
     s->lp_ctl6 = 0;
+    memcpy(s->accctl, accctl_reset, sizeof(s->accctl));
 }
 
 static const VMStateDescription vmstate_rzg2l_sysc = {
     .name = TYPE_RENESAS_RZG2L_SYSC,
-    .version_id = 1,
-    .minimum_version_id = 1,
+    .version_id = 2,
+    .minimum_version_id = 2,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT64_ARRAY(rvba, RenesasRZG2LSysCState,
                              RENESAS_RZG2L_SYSC_NUM_CA55),
@@ -264,6 +322,9 @@ static const VMStateDescription vmstate_rzg2l_sysc = {
         VMSTATE_UINT32(lp_ctl2, RenesasRZG2LSysCState),
         VMSTATE_UINT32(lp_ctl5, RenesasRZG2LSysCState),
         VMSTATE_UINT32(lp_ctl6, RenesasRZG2LSysCState),
+        VMSTATE_UINT32_ARRAY(accctl, RenesasRZG2LSysCState,
+                             RENESAS_RZG2L_SYSC_NUM_MSTACC +
+                             RENESAS_RZG2L_SYSC_NUM_SLVACC),
         VMSTATE_END_OF_LIST()
     }
 };
