@@ -24,6 +24,17 @@
  * kernel and its device tree. It writes BL2's parameter block for BL31
  * into SRAM, and starts CPU0 in a stub that enters BL31 as BL2 does. The
  * boot ROM, BL2 and DDR initialisation are not run.
+ *
+ * Without -bios and -kernel, in boot mode 3 or 4 (serial flash, manual
+ * Table 4.1), the machine does the boot ROM's load (section 4.2.4): at
+ * each reset it reads the loader size block at the start of the QSPI
+ * flash (-drive if=mtd), checks its signature, copies the loader from
+ * flash offset 0x200 into on-chip RAM at 0x12000 and starts CPU0 there
+ * at EL3; CPU1 stays off. The CPG and the SPI controller keep their reset
+ * values, where the ROM would have started the controller's clock: the
+ * loader (TF-A's BL2) sets both up itself. A flash the ROM could not
+ * boot from stops QEMU with an error; the ROM's fallback, SCIF download
+ * mode, is not modelled.
  */
 
 #include "qemu/osdep.h"
@@ -69,6 +80,11 @@ static const int rzv2l_smarc_phy_irq[R9A07G054_NUM_ETH] = { 2, 3 };
  * as BL33 go where U-Boot puts them on the board.
  */
 #define RZV2L_SMARC_BL2_BASE        0x00012000
+/* The boot ROM's loader area in on-chip RAM, 0x12000-0x2EFFF (4.2.4.3) */
+#define RZV2L_SMARC_LOADER_MAX      0x0001d000
+/* Its size block and the loader's offset in the flash (4.2.4.4) */
+#define RZV2L_SMARC_LOADER_BLOCK    0x200
+#define RZV2L_SMARC_LOADER_OFFSET   0x200
 #define RZV2L_SMARC_BL31_PARAMS     0x0002f000
 #define RZV2L_SMARC_BL31_BASE       0x44000000
 #define RZV2L_SMARC_BL31_SIZE       0x00040000
@@ -99,6 +115,9 @@ struct RZV2LSmarcState {
     /* Firmware mode: the Trusted OS and boot loader images BL2 loads */
     char *bl32;
     char *bl33;
+
+    /* The QSPI flash's drive, read by the boot ROM stand-in */
+    BlockBackend *flash_blk;
 };
 
 /*
@@ -267,8 +286,8 @@ static void rzv2l_smarc_attach_flash(RZV2LSmarcState *s)
     DeviceState *flash = qdev_new("mt25qu512a");
 
     if (di) {
-        qdev_prop_set_drive_err(flash, "drive", blk_by_legacy_dinfo(di),
-                                &error_fatal);
+        s->flash_blk = blk_by_legacy_dinfo(di);
+        qdev_prop_set_drive_err(flash, "drive", s->flash_blk, &error_fatal);
     }
     qdev_prop_set_uint32(flash, "nonvolatile-cfg", 0xffff);
     qdev_realize_and_unref(flash, BUS(s->soc.rpc.spi), &error_fatal);
@@ -431,6 +450,81 @@ static void rzv2l_smarc_load(const char *what, const char *filename,
     }
 }
 
+/*
+ * The boot ROM's load from the serial flash (manual 4.2.4.3, 4.2.4.4):
+ * the loader size (4 bytes, little-endian) at the start of the size
+ * block, the signature 0xAA55 in its last two bytes, the loader at 0x200.
+ * Anything the ROM could not boot from stops QEMU.
+ */
+static void rzv2l_smarc_rom_load(RZV2LSmarcState *s)
+{
+    uint8_t block[RZV2L_SMARC_LOADER_BLOCK];
+    g_autofree uint8_t *loader = NULL;
+    int64_t len;
+    uint32_t size;
+
+    if (!s->flash_blk) {
+        error_report("boot mode %u boots from the QSPI flash: give it "
+                     "with -drive if=mtd", s->boot_mode);
+        exit(1);
+    }
+    len = blk_getlength(s->flash_blk);
+    if (len < RZV2L_SMARC_LOADER_BLOCK ||
+        blk_pread(s->flash_blk, 0, sizeof(block), block, 0) < 0) {
+        error_report("boot ROM: cannot read the loader size block from "
+                     "the QSPI flash");
+        exit(1);
+    }
+    if (block[0x1fe] != 0x55 || block[0x1ff] != 0xaa) {
+        error_report("boot ROM: no loader on the QSPI flash (signature "
+                     "%02x %02x at 0x1fe, not 55 aa)", block[0x1fe],
+                     block[0x1ff]);
+        exit(1);
+    }
+    size = ldl_le_p(block);
+    if (size == 0 || size > RZV2L_SMARC_LOADER_MAX) {
+        error_report("boot ROM: loader size 0x%x is not 1 to 0x%x bytes",
+                     size, RZV2L_SMARC_LOADER_MAX);
+        exit(1);
+    }
+    if (len < RZV2L_SMARC_LOADER_OFFSET + size) {
+        error_report("boot ROM: the QSPI flash ends before the 0x%x-byte "
+                     "loader does", size);
+        exit(1);
+    }
+    loader = g_malloc(size);
+    if (blk_pread(s->flash_blk, RZV2L_SMARC_LOADER_OFFSET, size, loader,
+                  0) < 0) {
+        error_report("boot ROM: cannot read the loader from the QSPI flash");
+        exit(1);
+    }
+    address_space_write(&address_space_memory, RZV2L_SMARC_BL2_BASE,
+                        MEMTXATTRS_UNSPECIFIED, loader, size);
+}
+
+/* At each reset the ROM loads the loader again; CPU0 starts it, at EL3 */
+static void rzv2l_smarc_rom_cpu_reset(void *opaque)
+{
+    CPUState *cs = opaque;
+
+    cpu_reset(cs);
+    if (cs->cpu_index == 0) {
+        rzv2l_smarc_rom_load(RZV2L_SMARC_MACHINE(qdev_get_machine()));
+        cpu_set_pc(cs, RZV2L_SMARC_BL2_BASE);
+    }
+}
+
+static void rzv2l_smarc_rom_boot(RZV2LSmarcState *s)
+{
+    CPUState *cs;
+
+    /* Fail at start, not only at the first reset */
+    rzv2l_smarc_rom_load(s);
+    CPU_FOREACH(cs) {
+        qemu_register_reset(rzv2l_smarc_rom_cpu_reset, cs);
+    }
+}
+
 static void rzv2l_smarc_firmware_boot(RZV2LSmarcState *s,
                                       MachineState *machine)
 {
@@ -567,6 +661,9 @@ static void rzv2l_smarc_init(MachineState *machine)
     }
     if (machine->firmware) {
         rzv2l_smarc_firmware_boot(s, machine);
+    } else if (!machine->kernel_filename &&
+               (s->boot_mode == 3 || s->boot_mode == 4)) {
+        rzv2l_smarc_rom_boot(s);
     } else {
         arm_load_kernel(&s->soc.cpu[0], machine, &s->boot_info);
     }

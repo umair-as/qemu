@@ -61,9 +61,19 @@
  *   "ca55-run" n changes when that does. After a power-on reset core 0
  *   runs and core 1 is off until software starts it (section 2.2.1).
  * Nothing else in the SoC sees the clock, reset or module-stop state.
- * The PLL monitors, PLL4, PLL6, PLL5 output settings and the Cortex-A55
- * cluster P-Channel are not modelled, nor are offsets the manual does
- * not list. Accesses to them fail with a decode error.
+ * - PLL4 and PLL6 (sections 7.2.4.1 to 7.2.4.4): the standby control
+ *   register is written under its write-enable bits, the two output
+ *   clock setting registers are plain registers. Each monitor's RESETB
+ *   (bit 0) and LOCK (bit 4) follow the standby register's RESETB at
+ *   once: the model has no lock time.
+ * - The sampling rate converter's clock and reset registers (CLKON 0x574,
+ *   RST 0x874 and their monitors), which the manual's revision history
+ *   lists as deleted but the boot firmware sets and polls, behave as
+ *   their siblings; their reset values are an inference (clock off,
+ *   reset applied).
+ * The PLL1 monitor, PLL5 output settings and the Cortex-A55 cluster
+ * P-Channel are not modelled, nor are offsets the manual does not list.
+ * Accesses to them fail with a decode error.
  */
 
 #include "qemu/osdep.h"
@@ -88,6 +98,7 @@ typedef enum {
     CPG_RSTMON,     /* computed from the CPG_RST_x 0x180 below */
     CPG_WDTOVF,     /* CPG_WDTOVF_RST: kept across system resets */
     CPG_PCHMON,     /* computed from the CPG_COREn_PCHCTL 4 above */
+    CPG_PLLMON,     /* computed from the CPG_SAMPLLn_STBY 0xc below */
 } CPGRegKind;
 
 typedef struct {
@@ -106,6 +117,8 @@ typedef struct {
       .rw = mask, .wen = en }
 #define CPG_RO0(off, nm) \
     { .offset = off, .kind = CPG_ZERO, .name = #nm }
+#define CPG_PLLM(off, nm) \
+    { .offset = off, .kind = CPG_PLLMON, .name = #nm }
 /* For a monitor, .reset holds its reserved bits that read as 1 */
 #define CPG_MON(off, nm, fixed) \
     { .offset = off, .name = #nm, .reset = fixed, \
@@ -114,6 +127,14 @@ typedef struct {
 static const CPGReg cpg_regs[] = {
     CPG_RW(0x004, SAMPLL1_CLK1, 0x00001901, 0xffffffff),
     CPG_RW(0x008, SAMPLL1_CLK2, 0x00180601, 0x00ff3f07),
+    CPG_WE(0x010, SAMPLL4_STBY, 0x00000004, 0x0035, 0x0015),
+    CPG_RW(0x014, SAMPLL4_CLK1, 0x00003203, 0xffffffff),
+    CPG_RW(0x018, SAMPLL4_CLK2, 0x00082400, 0x00ff3f07),
+    CPG_PLLM(0x01c, SAMPLL4_MON),
+    CPG_WE(0x020, SAMPLL6_STBY, 0x00000000, 0x0035, 0x0015),
+    CPG_RW(0x024, SAMPLL6_CLK1, 0x00003e83, 0xffffffff),
+    CPG_RW(0x028, SAMPLL6_CLK2, 0x00082d02, 0x00ff3f07),
+    CPG_PLLM(0x02c, SAMPLL6_MON),
     CPG_WE(0x140, SIPLL5_STBY, 0x00000014, 0x0015, 0x0015),
     CPG_WE(0x200, PL1_DDIV, 0x00000000, 0x0003, 0x0001),
     CPG_WE(0x204, PL2_DDIV, 0x00000000, 0x3007, 0x1001),
@@ -155,6 +176,7 @@ static const CPGReg cpg_regs[] = {
     CPG_WE(0x568, CLKON_MIPI_DSI, 0x00000000, 0x003f, 0x003f),
     CPG_WE(0x56c, CLKON_LCDC, 0x00000000, 0x0003, 0x0003),
     CPG_WE(0x570, CLKON_SSI, 0x00000000, 0x00ff, 0x00ff),
+    CPG_WE(0x574, CLKON_SRC, 0x00000000, 0x0001, 0x0001),
     CPG_WE(0x578, CLKON_USB, 0x00000000, 0x000f, 0x000f),
     CPG_WE(0x57c, CLKON_ETH, 0x00000000, 0x0003, 0x0003),
     CPG_WE(0x580, CLKON_I2C, 0x00000000, 0x000f, 0x000f),
@@ -196,6 +218,7 @@ static const CPGReg cpg_regs[] = {
     CPG_MON(0x6e8, CLKMON_MIPI_DSI, 0x0),
     CPG_MON(0x6ec, CLKMON_LCDC, 0x0),
     CPG_MON(0x6f0, CLKMON_SSI, 0x0),
+    CPG_MON(0x6f4, CLKMON_SRC, 0x0),
     CPG_MON(0x6f8, CLKMON_USB, 0x0),
     CPG_MON(0x6fc, CLKMON_ETH, 0x0),
     CPG_MON(0x700, CLKMON_I2C, 0x0),
@@ -236,6 +259,7 @@ static const CPGReg cpg_regs[] = {
     CPG_WE(0x868, RST_MIPI_DSI, 0x00000000, 0x0007, 0x0007),
     CPG_WE(0x86c, RST_LCDC, 0x00000000, 0x0001, 0x0001),
     CPG_WE(0x870, RST_SSIF, 0x00000000, 0x000f, 0x000f),
+    CPG_WE(0x874, RST_SRC, 0x00000000, 0x0001, 0x0001),
     CPG_WE(0x878, RST_USB, 0x00000000, 0x000f, 0x000f),
     CPG_WE(0x87c, RST_ETH, 0x00000000, 0x0003, 0x0003),
     CPG_WE(0x880, RST_I2C, 0x00000000, 0x000f, 0x000f),
@@ -275,6 +299,7 @@ static const CPGReg cpg_regs[] = {
     CPG_MON(0x9e8, RSTMON_MIPI_DSI, 0),
     CPG_MON(0x9ec, RSTMON_LCDC, 0),
     CPG_MON(0x9f0, RSTMON_SSIF, 0),
+    CPG_MON(0x9f4, RSTMON_SRC, 0),
     CPG_MON(0x9f8, RSTMON_USB, 0),
     CPG_MON(0x9fc, RSTMON_ETH, 0),
     CPG_MON(0xa00, RSTMON_I2C, 0),
@@ -320,6 +345,11 @@ static const struct {
     uint16_t offset;
     uint32_t value;
 } cpg_post_firmware[] = {
+    /* PLL4 and PLL6: BL2's writes (cpg_pll_setup()), not read on the EVK */
+    { 0x010, 0x00000005 },   /* SAMPLL4_STBY: normal mode (BL2) */
+    { 0x014, 0xfae13203 },   /* SAMPLL4_CLK1 (BL2, DDR-1600) */
+    { 0x018, 0x00081000 },   /* SAMPLL4_CLK2 (BL2) */
+    { 0x020, 0x00000001 },   /* SAMPLL6_STBY: normal mode (BL2) */
     { 0x208, 0x00000100 },   /* PL3A_DDIV */
     { 0x218, 0x00000022 },   /* PL2SDHI_DSEL */
     { 0x21c, 0x00000001 },   /* PL4_DSEL */
@@ -360,6 +390,10 @@ static const struct {
     uint16_t offset;
     uint32_t value;
 } cpg_post_bl2[] = {
+    { 0x010, 0x00000005 },   /* SAMPLL4_STBY: normal mode (BL2) */
+    { 0x014, 0xfae13203 },   /* SAMPLL4_CLK1 (BL2, DDR-1600) */
+    { 0x018, 0x00081000 },   /* SAMPLL4_CLK2 (BL2) */
+    { 0x020, 0x00000001 },   /* SAMPLL6_STBY: normal mode (BL2) */
     { 0x208, 0x00000100 },   /* PL3A_DDIV */
     { 0x218, 0x00000022 },   /* PL2SDHI_DSEL */
     { 0x21c, 0x00000001 },   /* PL4_DSEL */
@@ -404,6 +438,9 @@ static const CPGReg *cpg_lookup(hwaddr offset, int *idx)
 #define CPG_CORE0_PCHCTL    0xb3c
 #define CPG_CORE1_PCHCTL    0xb44
 #define CPG_PCHCTL_PREQ     BIT(0)
+#define CPG_PLL_RESETB      BIT(0)
+#define CPG_PLLMON_RESETB   BIT(0)
+#define CPG_PLLMON_LOCK     BIT(4)
 #define CPG_PCHCTL_PSTATE(v)    extract32(v, 16, 6)
 #define CPG_PSTATE_ON       0x08
 #define CPG_PSTATE_OFF_EMU  0x01
@@ -576,6 +613,11 @@ static MemTxResult rzv2l_cpg_read(void *opaque, hwaddr offset,
         /* PACCEPT follows PREQ; nothing is ever denied */
         value = s->regs[cpg_index[(offset + 4) / 4]] & CPG_PCHCTL_PREQ;
         break;
+    case CPG_PLLMON:
+        /* Normal mode and locked at once while STBY.RESETB is 1 */
+        value = (s->regs[cpg_index[(offset - 0xc) / 4]] & CPG_PLL_RESETB) ?
+                CPG_PLLMON_RESETB | CPG_PLLMON_LOCK : 0;
+        break;
     default:
         value = s->regs[idx];
         break;
@@ -736,8 +778,8 @@ static void rzv2l_cpg_init(Object *obj)
 
 static const VMStateDescription vmstate_rzv2l_cpg = {
     .name = TYPE_RENESAS_RZV2L_CPG,
-    .version_id = 3,
-    .minimum_version_id = 3,
+    .version_id = 4,
+    .minimum_version_id = 4,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, RenesasRZV2LCPGState,
                              RENESAS_RZV2L_CPG_NUM_REGS),

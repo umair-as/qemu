@@ -145,6 +145,41 @@ static void test_sysc_boot_mode_reserved(void)
     g_test_trap_assert_stderr("*boot-mode 6 is reserved*");
 }
 
+/*
+ * The master and slave access control registers: the reset values of
+ * Table 6.1 (p.167-168), stored as written. SYS_SLVACCCTL6 is at
+ * 0x118 (Table 6.1 repeats 0x114). A qtest access carries no security
+ * state; the Non-secure refusal is checked from EL1 by the M1 probe.
+ */
+static void test_sysc_accctl(void)
+{
+    static const struct {
+        uint32_t offset, reset;
+    } r[] = {
+        { 0x000, 0x00aaaa00 }, { 0x004, 0xaaaaaaaa }, { 0x008, 0x00aaaaaa },
+        { 0x00c, 0x00aaaaaa }, { 0x010, 0xaaaa00aa }, { 0x014, 0xaaaa00aa },
+        { 0x100, 0x0aaaaaa0 }, { 0x104, 0x0800c0aa }, { 0x108, 0x00000002 },
+        { 0x10c, 0 }, { 0x110, 0 }, { 0x114, 0 }, { 0x118, 0 },
+        { 0x11c, 0 }, { 0x120, 0 }, { 0x128, 0 }, { 0x130, 0 },
+        { 0x134, 0 }, { 0x138, 0 },
+    };
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(r); i++) {
+        g_assert_cmphex(qtest_readl(qts, SYSC_BASE + r[i].offset), ==,
+                        r[i].reset);
+    }
+    /*
+     * A value stored at 0x118 (SYS_SLVACCCTL6) reads back there and not
+     * at 0x114 (SYS_SLVACCCTL5), the address Table 6.1 repeats
+     */
+    qtest_writel(qts, SYSC_BASE + 0x118, 0x00000008);
+    g_assert_cmphex(qtest_readl(qts, SYSC_BASE + 0x118), ==, 0x00000008);
+    g_assert_cmphex(qtest_readl(qts, SYSC_BASE + 0x114), ==, 0);
+    qtest_quit(qts);
+}
+
 static void test_gic_layout(void)
 {
     QTestState *qts = qtest_init("-machine rzv2l-smarc");
@@ -365,6 +400,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-smarc/gic/layout", test_gic_layout);
     qtest_add_func("/rzv2l-smarc/gic/identity", test_gic_identity);
     qtest_add_func("/rzv2l-smarc/sysc/ca55", test_sysc_ca55);
+    qtest_add_func("/rzv2l-smarc/sysc/access-control", test_sysc_accctl);
     qtest_add_func("/rzv2l-smarc/tzc", test_tzc);
     qtest_add_func("/rzv2l-smarc/syc", test_syc);
     qtest_add_func("/rzv2l-smarc/stubs", test_stubs);

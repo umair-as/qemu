@@ -35,6 +35,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(RenesasRZG2LSysCState, RENESAS_RZG2L_SYSC)
 
 #define RENESAS_RZG2L_SYSC_MMIO_SIZE 0x10000
 #define RENESAS_RZG2L_SYSC_NUM_CA55  2
+/* SYS_MSTACCCTL0-5, then SYS_SLVACCCTL0-15 */
+#define RENESAS_RZG2L_SYSC_NUM_MSTACC 6
+#define RENESAS_RZG2L_SYSC_NUM_SLVACC 16
 
 struct RenesasRZG2LSysCState {
     /*< private >*/
@@ -58,6 +61,8 @@ struct RenesasRZG2LSysCState {
     uint32_t lp_ctl2;
     uint32_t lp_ctl5;
     uint32_t lp_ctl6;
+    uint32_t accctl[RENESAS_RZG2L_SYSC_NUM_MSTACC +
+                    RENESAS_RZG2L_SYSC_NUM_SLVACC];
 };
 
 uint64_t rzg2l_sysc_reset_vector(RenesasRZG2LSysCState *s, int core);
