@@ -115,6 +115,25 @@ static void test_storage(void)
     qtest_quit(qts);
 }
 
+/* A system reset clears the computed state too */
+static void test_reset_state(void)
+{
+    QTestState *qts = qtest_init("-machine rzv2l-smarc");
+
+    mc_write(qts, MC_CTL00, 1);
+    mc_write(qts, MC_MRW, 1u << 25);
+    mc_write(qts, MC_LP_CMD, 0x00001100);
+    g_assert_cmphex(mc_read(qts, MC_ST_INIT), ==, MC_INIT_DONE);
+    g_assert_cmphex(mc_read(qts, MC_ST_MODE), ==, MC_MRW_DONE);
+    g_assert_cmphex(mc_read(qts, MC_LP_STATE), ==, 0x48000000);
+
+    qtest_system_reset(qts);
+    g_assert_cmphex(mc_read(qts, MC_ST_INIT), ==, 0);
+    g_assert_cmphex(mc_read(qts, MC_ST_MODE), ==, 0);
+    g_assert_cmphex(mc_read(qts, MC_LP_STATE), ==, 0);
+    qtest_quit(qts);
+}
+
 /* START sets init-done; its acknowledgement or START = 0 clears it */
 static void test_init_done(void)
 {
@@ -223,7 +242,13 @@ static void test_read_only(void)
 /* BL2's training commands complete at once; write leveling clears 0x14c */
 static void test_training(void)
 {
+    /* TF-A ddr.c: write leveling, the VREF, bit and SL training passes */
+    static const uint32_t commands[] = {
+        0x50200000, 0x30800000, 0x30500000, 0x30a00000, 0x30700000,
+        0x11200000, 0x34200000,
+    };
     QTestState *qts = qtest_init("-machine rzv2l-smarc");
+    int i;
 
     phy_write(qts, PHY_WRLVL_TRIM, 0xffffffff);
     phy_write(qts, PHY_SCL_START, 0x30800000);
@@ -232,6 +257,13 @@ static void test_training(void)
     phy_write(qts, PHY_SCL_START, 0x50200000);
     g_assert_cmphex(phy_read(qts, PHY_SCL_START), ==, 0x40200003);
     g_assert_cmphex(phy_read(qts, PHY_WRLVL_TRIM), ==, 0xfffffffc);
+
+    /* Each of BL2's seven commands completes */
+    for (i = 0; i < ARRAY_SIZE(commands); i++) {
+        phy_write(qts, PHY_SCL_START, commands[i]);
+        g_assert_cmphex(phy_read(qts, PHY_SCL_START), ==,
+                        (commands[i] & ~(1u << 28)) | 3);
+    }
 
     /* A value without the start bit is stored */
     phy_write(qts, PHY_SCL_START, 0x00000004);
@@ -275,6 +307,7 @@ int main(int argc, char **argv)
 
     qtest_add_func("/rzv2l-ddr/reset", test_reset);
     qtest_add_func("/rzv2l-ddr/storage", test_storage);
+    qtest_add_func("/rzv2l-ddr/reset-state", test_reset_state);
     qtest_add_func("/rzv2l-ddr/init-done", test_init_done);
     qtest_add_func("/rzv2l-ddr/mode-register", test_mode_register);
     qtest_add_func("/rzv2l-ddr/low-power", test_low_power);
