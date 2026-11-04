@@ -56,7 +56,10 @@
  * enable bits) move the same bytes as SDR and are logged once. Not
  * supported, each logged under unimp and refused with a bus error:
  * HyperFlash and Octal-SPI (PHYMEM = 11, HYPE, OCT), two flash memories
- * (BSZ = 01), the write buffer (WBUF, WBUF2), high-speed mode (HS). Not
+ * (BSZ = 01), the write buffer (WBUF, WBUF2), high-speed mode (HS). A
+ * transfer with a setting the manual prohibits (for example SPIDE =
+ * 1110, or SMCR.SPIE in external address space read mode) sends nothing
+ * and is refused with a bus error, logged as a guest error. Not
  * modelled: the QSPI_RESET# and QSPI_WP# outputs (PHYINT), the SPIHF
  * interrupt, and the time a transfer takes.
  */
@@ -438,8 +441,9 @@ static int rpc_spide_bytes(uint32_t smenr)
 }
 
 /*
- * A manual mode transfer (SMCR.SPIE = 1). Returns false when the
- * transfer needs a mode the model does not support.
+ * A manual mode transfer (SMCR.SPIE = 1). Returns false, logged, when
+ * the transfer is refused: it needs a mode the model does not support,
+ * or a setting the manual prohibits, which sends nothing.
  */
 static bool rpc_manual_xfer(RenesasRZV2LRPCState *s)
 {
@@ -454,7 +458,7 @@ static bool rpc_manual_xfer(RenesasRZV2LRPCState *s)
     if (!FIELD_EX32(s->cmncr, CMNCR, MD)) {
         qemu_log_mask(LOG_GUEST_ERROR, "renesas-rzv2l-rpc: SMCR.SPIE in "
                       "external address space read mode\n");
-        return true;
+        return false;
     }
     if (!rpc_config_ok(s, s->smdrenr)) {
         return false;
@@ -463,16 +467,16 @@ static bool rpc_manual_xfer(RenesasRZV2LRPCState *s)
         qemu_log_mask(LOG_GUEST_ERROR,
                       "renesas-rzv2l-rpc: prohibited SPIDE 0x%x\n",
                       FIELD_EX32(s->smenr, EN, SPIDE));
-        return true;
+        return false;
     }
     if (!rpc_build_header(&h, s->smenr, s->smcmr, s->smadr, s->smopr,
                           s->smdmcr, true)) {
-        return true;
+        return false;
     }
     if (!h.len && !n) {
         qemu_log_mask(LOG_GUEST_ERROR,
                       "renesas-rzv2l-rpc: manual transfer of nothing\n");
-        return true;
+        return false;
     }
     if (spire && sslkp) {
         qemu_log_mask(LOG_GUEST_ERROR,
