@@ -62,3 +62,12 @@ allwinner_a10_spi_tx(uint8_t byte) "write 0x%02x"
 allwinner_a10_spi_rx(uint8_t byte) "read 0x%02x"
 allwinner_a10_spi_read(const char* regname, uint32_t value) "reg[%s] => 0x%08x"
 allwinner_a10_spi_write(const char* regname, uint32_t value) "reg[%s] <= 0x%08x"
+
+# renesas_rzv2l_rpc.c
+renesas_rzv2l_rpc_reg_read(uint64_t offset, uint32_t data, unsigned size) "offset 0x%" PRIx64 " data 0x%08x size %u"
+renesas_rzv2l_rpc_reg_write(uint64_t offset, uint32_t data, unsigned size) "offset 0x%" PRIx64 " data 0x%08x size %u"
+renesas_rzv2l_rpc_manual(uint8_t cmd, uint32_t smenr, uint32_t smadr, int bytes, bool write, bool read) "command 0x%02x SMENR 0x%08x SMADR 0x%08x data %d write %u read %u"
+renesas_rzv2l_rpc_read(uint8_t cmd, uint32_t addr, unsigned len, bool burst) "command 0x%02x address 0x%08x length %u burst %u"
+renesas_rzv2l_rpc_ssl(bool asserted) "QSPI0_SSL asserted %u"
+renesas_rzv2l_rpc_rst(int level) "reset %d"
+renesas_rzv2l_rpc_clk(int level) "clock %d"
