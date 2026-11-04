@@ -95,6 +95,9 @@
 #define PAT1                0x00100000
 #define PAT2                0x02000000
 #define PAT_LEN             0x1000
+/* Non-repeating data for the boot firmware's read path, below 16 MiB */
+#define HASH_BASE           0x00a00000
+#define HASH_LEN            0x3000
 
 static uint8_t pat(uint32_t a)
 {
@@ -105,6 +108,16 @@ static uint32_t pat32(uint32_t a)
 {
     return pat(a) | pat(a + 1) << 8 | pat(a + 2) << 16 |
            (uint32_t)pat(a + 3) << 24;
+}
+
+/* A byte per address from a 32-bit mix: no period within HASH_LEN */
+static uint8_t hash(uint32_t a)
+{
+    a *= 0x9e3779b1;
+    a ^= a >> 15;
+    a *= 0x85ebca77;
+    a ^= a >> 13;
+    return a >> 24;
 }
 
 static char *make_image(void)
@@ -126,6 +139,11 @@ static char *make_image(void)
         buf[i] = pat(PAT2 + i);
     }
     g_assert(pwrite(fd, buf, sizeof(buf), PAT2) == sizeof(buf));
+    for (i = 0; i < HASH_LEN; i++) {
+        uint8_t b = hash(HASH_BASE + i);
+
+        g_assert(pwrite(fd, &b, 1, HASH_BASE + i) == 1);
+    }
     close(fd);
     return path;
 }
@@ -458,6 +476,79 @@ static void test_read_cache(void)
 }
 
 /*
+ * The read path of TF-A's BL2 (plat/renesas/rz/common/drivers/spi_multi/
+ * spi_multi.c, MT25QU512ABB/spi_multi_reg_values.h), with its register
+ * values: quad I/O fast read with a 24-bit address (1-4-4, EBh), 10
+ * dummy cycles (DRDMCR = 9), the read cache on with 32-line bursts and
+ * a flush (DRCR 0x001f0300). It reads its FIP this way. 12 KiB of
+ * non-repeating data from an unaligned address, 48 bursts, compared
+ * byte by byte with the image the test wrote; then the burst length,
+ * through a flash write the cache does not see.
+ */
+static void test_bl2_read(void)
+{
+    char *img = make_image();
+    QTestState *qts = start(img);
+    uint32_t from = HASH_BASE + 0x13, len = HASH_LEN - 0x13 - 0x5;
+    g_autofree uint8_t *buf = g_malloc(len);
+    uint32_t i;
+
+    wr(qts, PHYCNT, 0x00000260);
+    wr(qts, PHYOFFSET1, 0x31511144);
+    wr(qts, PHYOFFSET2, 0x00000431);
+    wr(qts, CMNCR, 0x0155a200);
+    wr(qts, SSLDR, 0x00030303);
+    wr(qts, DRCR, 0x001f0300);
+    rd(qts, DRCR);
+    wr(qts, DRCMR, CMD(0xeb));
+    wr(qts, DREAR, 0);
+    wr(qts, DRENR, 0x0202c700);
+    wr(qts, DRDMCR, 9);
+    wr(qts, DRDRENR, 0);
+    wr(qts, PHYCNT, 0x00030260);
+
+    qtest_memread(qts, RPC_BUS + from, buf, len);
+    for (i = 0; i < len; i++) {
+        if (buf[i] != hash(from + i)) {
+            g_test_message("flash 0x%x: read 0x%02x, wrote 0x%02x",
+                           from + i, buf[i], hash(from + i));
+        }
+        g_assert_cmphex(buf[i], ==, hash(from + i));
+    }
+    /*
+     * A burst is 32 lines: program 4 bytes in its last line and 4 bytes
+     * after it; the last line is still a cache hit with the old data,
+     * the line after it a miss with the new
+     */
+    g_assert_cmphex(qtest_readb(qts, RPC_BUS + HASH_BASE + 0x1000), ==,
+                    hash(HASH_BASE + 0x1000));
+    wr(qts, CMNCR, 0x0155a200 | CMNCR_MD);
+    wr(qts, SMWDR0, 0);
+    wren(qts);
+    manual(qts, FL_PP, HASH_BASE + 0x10f8,
+           EN_CDE | EN_ADE(0x7) | EN_SPIDE(0xf), SMCR_SPIWE);
+    wren(qts);
+    manual(qts, FL_PP, HASH_BASE + 0x1100,
+           EN_CDE | EN_ADE(0x7) | EN_SPIDE(0xf), SMCR_SPIWE);
+    wr(qts, CMNCR, 0x0155a200);
+    g_assert_cmphex(qtest_readb(qts, RPC_BUS + HASH_BASE + 0x10f8), ==,
+                    hash(HASH_BASE + 0x10f8));
+    g_assert_cmphex(qtest_readl(qts, RPC_BUS + HASH_BASE + 0x1100), ==, 0);
+
+    /* Word reads across a burst boundary, after the bursts above */
+    for (i = 0xf8; i < 0x110; i += 4) {
+        g_assert_cmphex(qtest_readl(qts, RPC_BUS + HASH_BASE + i), ==,
+                        hash(HASH_BASE + i) |
+                        hash(HASH_BASE + i + 1) << 8 |
+                        hash(HASH_BASE + i + 2) << 16 |
+                        (uint32_t)hash(HASH_BASE + i + 3) << 24);
+    }
+    qtest_quit(qts);
+    unlink(img);
+    g_free(img);
+}
+
+/*
  * DRCR.SSLE = 1: QSPI0_SSL stays asserted after a burst and TEND reads 0
  * until SSLN negates it (sections 25.4.3, 25.5.12); the next burst at
  * the following address continues the same flash command
@@ -516,6 +607,7 @@ int main(int argc, char **argv)
     qtest_add_func("/rzv2l-rpc/manual-write", test_manual_write);
     qtest_add_func("/rzv2l-rpc/normal-read", test_normal_read);
     qtest_add_func("/rzv2l-rpc/read-cache", test_read_cache);
+    qtest_add_func("/rzv2l-rpc/bl2-read", test_bl2_read);
     qtest_add_func("/rzv2l-rpc/ssle", test_ssle);
     qtest_add_func("/rzv2l-rpc/gates", test_gates);
 
