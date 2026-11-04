@@ -778,8 +778,8 @@ static void rzv2l_cpg_init(Object *obj)
 
 static const VMStateDescription vmstate_rzv2l_cpg = {
     .name = TYPE_RENESAS_RZV2L_CPG,
-    .version_id = 3,
-    .minimum_version_id = 3,
+    .version_id = 4,
+    .minimum_version_id = 4,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, RenesasRZV2LCPGState,
                              RENESAS_RZV2L_CPG_NUM_REGS),
