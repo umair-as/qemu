@@ -69,13 +69,15 @@ Supported devices
 Missing devices
 ---------------
 
-I2C, USB, the display, CAN-FD,
+I2C, USB, the display, the audio serial interfaces (SSI), RSPI1, CAN-FD,
 the ADC, the thermal sensor and the DMA controller are stubs: they log
-every access and read as zero, so their drivers fail when they probe.
+every access, so their drivers cannot use the hardware. They read as
+zero, except the DMA controller and the USB PHY control registers, which
+keep the values written to them.
 Every other on-chip block is missing. The serial ports have no modem
 lines, break or error detection, and do not enforce the baud rate.
 Accesses to unmodelled addresses,
-and to SYSC registers other than the identification registers, fail
+and to SYSC registers the model does not implement, fail
 with an external abort instead of reading as zero.
 
 When a kernel is loaded with ``-kernel``, SCIF0 starts in the state the

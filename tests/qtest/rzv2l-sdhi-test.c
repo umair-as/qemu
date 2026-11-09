@@ -328,7 +328,8 @@ static void test_pio(void)
     /*
      * The EVK with a card in the SDHI0 slot reads INFO10 = 1 and INFO5 =
      * INFO7 = 0: the module routes neither SD0_CD (in this pin mux) nor
-     * SD0_WP to the SDHI (EVK-R75; module UM Table 4.1 p.20, p.25).
+     * SD0_WP to the SDHI (registers read at the board's U-Boot prompt;
+     * module UM Table 4.1 p.20, p.25).
      */
     g_assert_cmphex(rd(qts, b, SD_INFO1) & (INFO5 | INFO7 | INFO10), ==,
                     INFO10);
