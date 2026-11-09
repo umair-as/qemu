@@ -149,7 +149,7 @@ static void test_sysc_boot_mode_reserved(void)
  * The master and slave access control registers: the reset values of
  * Table 6.1 (p.167-168), stored as written. SYS_SLVACCCTL6 is at
  * 0x118 (Table 6.1 repeats 0x114). A qtest access carries no security
- * state; the Non-secure refusal is checked from EL1 by the M1 probe.
+ * state; the Non-secure refusal is checked from EL1 by a guest probe.
  */
 static void test_sysc_accctl(void)
 {
